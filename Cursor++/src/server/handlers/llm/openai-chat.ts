@@ -12,13 +12,15 @@ import type { LLMProvider, LLMStreamRequest, LLMStreamEvent } from './types';
 import { encodeOpenAIRequestMessages, encodeOpenAITools } from './conversationCodec';
 import { createProxiedFetch } from './proxyFetch';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders } from './userAgent';
+import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent';
 
 export class OpenAIChatProvider implements LLMProvider {
     readonly name = 'openai-chat';
     private client: OpenAI;
+    private customHeaders?: Record<string, string>;
 
     constructor(entry: ProviderEntry) {
+        this.customHeaders = entry.headers;
         const opts: ConstructorParameters<typeof OpenAI>[0] = {
             apiKey: entry.auth.value,
         };
@@ -62,7 +64,11 @@ export class OpenAIChatProvider implements LLMProvider {
             params.reasoning_effort = request.thinkingLevel;
         }
 
-        const stream = await this.client.chat.completions.create(params);
+        const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders);
+        const stream = await this.client.chat.completions.create(
+            params,
+            sessionHeaders ? { headers: sessionHeaders } : undefined,
+        );
 
         const toolCalls = new Map<number, { id: string; name: string; args: string }>();
         let usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | null = null;

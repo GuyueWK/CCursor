@@ -20,14 +20,16 @@ import { logger } from '../../logger'
 import { encodeResponsesInput, encodeResponsesTools } from './conversationCodec'
 import { createProxiedFetch } from './proxyFetch'
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages'
-import { buildDefaultHeaders } from './userAgent'
+import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent'
 import type { LLMProvider, LLMStreamEvent, LLMStreamRequest } from './types'
 
 export class OpenAIResponsesProvider implements LLMProvider {
   readonly name = 'openai-responses'
   private client: OpenAI
+  private customHeaders?: Record<string, string>
 
   constructor(entry: ProviderEntry) {
+    this.customHeaders = entry.headers
     const opts: ConstructorParameters<typeof OpenAI>[0] = {
       apiKey: entry.auth.value,
     }
@@ -85,7 +87,11 @@ export class OpenAIResponsesProvider implements LLMProvider {
       params.include = ['reasoning.encrypted_content']
     }
 
-    const stream = await this.client.responses.create(params)
+    const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders)
+    const stream = await this.client.responses.create(
+      params,
+      sessionHeaders ? { headers: sessionHeaders } : undefined,
+    )
 
     // 跟踪活跃的 function_call items (item_id → { callId, name, hadDeltas })
     const activeCalls = new Map<string, { callId: string, name: string, hadDeltas: boolean }>()

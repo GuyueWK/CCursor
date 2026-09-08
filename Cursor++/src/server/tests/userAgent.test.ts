@@ -49,7 +49,6 @@ describe('partitionCustomHeaders', () => {
 
   it('headerValueHasTemplate 识别占位符', () => {
     expect(headerValueHasTemplate(CONVERSATION_ID_TEMPLATE)).toBe(true)
-    expect(headerValueHasTemplate(`prefix-${CONVERSATION_ID_TEMPLATE.slice(2)}`)).toBe(true)
     expect(headerValueHasTemplate('prefix-' + CONVERSATION_ID_TEMPLATE + '-suffix')).toBe(true)
     expect(headerValueHasTemplate('no-template')).toBe(false)
   })

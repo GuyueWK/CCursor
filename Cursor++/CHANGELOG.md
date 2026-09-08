@@ -4,6 +4,12 @@ All notable changes to the Cursor++ BYOK extension are documented here.
 
 Format follows [Keep a Changelog](http://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Per-conversation `x-opencode-session` header: when `conversationId` is present on an LLM request, all providers (openai-chat / openai-responses / anthropic / gemini) send a sanitized session affinity header for gateway sticky routing and prompt-cache affinity (OpenCode Go and similar). Static `ProviderEntry.headers` remain supported; live conversationId wins over a static `x-opencode-session`. Custom `User-Agent` is unchanged.
+
 ## [0.0.7]
 
 ### Added

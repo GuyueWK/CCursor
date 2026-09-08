@@ -238,14 +238,16 @@ export interface ProviderEntry {
    */
   proxyUrl?: string
   /**
-   * 自定义请求头 — 每次 LLM 请求时附加。
+   * 自定义请求头 — 作为 SDK defaultHeaders 附加到 LLM 请求。
    *
    * 用途:
    *   - Anthropic: anthropic-beta (interleaved-thinking, prompt-caching-scope 等)
    *   - OpenAI: 自定义 header (如 Helicone 等代理网关需要的 key)
-   *   - 第三方兼容 API: 特定认证或功能头
+   *   - User-Agent: 覆盖默认 UA (明确标识客户端)
+   *   - x-opencode-session: 仅作无 conversationId 时的静态回退；
+   *     有 conversationId 时由运行时按会话动态注入并覆盖此静态值
    *
-   * 示例: { "anthropic-beta": "interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05" }
+   * 示例: { "User-Agent": "Cursor++/0.0.15 (ccursor)", "anthropic-beta": "..." }
    */
   headers?: Record<string, string>
 }

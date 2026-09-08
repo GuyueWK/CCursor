@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   SESSION_AFFINITY_HEADER,
   buildDefaultHeaders,
-  buildSessionAffinityRequestHeaders,
-  resolveSessionAffinityHeader,
+  buildTemplatedRequestHeaders,
+  headerValueHasTemplate,
+  partitionCustomHeaders,
+  resolveHeaderTemplates,
   sanitizeSessionId,
 } from '../handlers/llm/userAgent'
 
@@ -26,43 +28,69 @@ describe('sanitizeSessionId', () => {
   })
 })
 
-describe('resolveSessionAffinityHeader', () => {
-  it('conversationId 优先于静态 headers', () => {
-    expect(resolveSessionAffinityHeader('conv-live', {
-      [SESSION_AFFINITY_HEADER]: 'static-session',
+describe('partitionCustomHeaders', () => {
+  it('把模板头和静态头分开', () => {
+    const { staticHeaders, templatedHeaders } = partitionCustomHeaders({
       'User-Agent': 'Cursor++/test',
-    })).toBe('conv-live')
+      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      'X-Debug': 'static',
+    })
+    expect(staticHeaders).toEqual({
+      'User-Agent': 'Cursor++/test',
+      'X-Debug': 'static',
+    })
+    expect(templatedHeaders).toEqual({
+      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+    })
   })
 
-  it('无 conversationId 时回退静态 x-opencode-session', () => {
-    expect(resolveSessionAffinityHeader(undefined, {
-      [SESSION_AFFINITY_HEADER]: 'static-session',
-    })).toBe('static-session')
-  })
-
-  it('静态 header 大小写不敏感', () => {
-    expect(resolveSessionAffinityHeader('', {
-      'X-Opencode-Session': 'Static.Case',
-    })).toBe('Static.Case')
-  })
-
-  it('两者都缺时返回 undefined', () => {
-    expect(resolveSessionAffinityHeader(undefined, { 'User-Agent': 'x' })).toBeUndefined()
-    expect(resolveSessionAffinityHeader('  ')).toBeUndefined()
+  it('headerValueHasTemplate 识别占位符', () => {
+    expect(headerValueHasTemplate('${conversationId}')).toBe(true)
+    expect(headerValueHasTemplate('prefix-${conversationId}-suffix')).toBe(true)
+    expect(headerValueHasTemplate('no-template')).toBe(false)
   })
 })
 
-describe('buildSessionAffinityRequestHeaders', () => {
-  it('有 conversationId 时发出覆盖用的 per-request header', () => {
-    expect(buildSessionAffinityRequestHeaders('conv-1', {
-      [SESSION_AFFINITY_HEADER]: 'static',
-    })).toEqual({ [SESSION_AFFINITY_HEADER]: 'conv-1' })
+describe('resolveHeaderTemplates', () => {
+  it('解析 ${conversationId}', () => {
+    expect(resolveHeaderTemplates({
+      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      'X-Trace': 'chat/${conversationId}/v1',
+    }, { conversationId: 'conv-live' })).toEqual({
+      [SESSION_AFFINITY_HEADER]: 'conv-live',
+      'X-Trace': 'chat/conv-live/v1',
+    })
   })
 
-  it('仅有静态值时不重复发 per-request（交给 defaultHeaders）', () => {
-    expect(buildSessionAffinityRequestHeaders(undefined, {
-      [SESSION_AFFINITY_HEADER]: 'static',
-    })).toBeUndefined()
+  it('conversationId 缺失时省略仅依赖它的头', () => {
+    expect(resolveHeaderTemplates({
+      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+    }, {})).toBeUndefined()
+  })
+
+  it('未知变量展开为空', () => {
+    expect(resolveHeaderTemplates({
+      'X-Foo': '${unknownVar}',
+    }, { conversationId: 'c1' })).toBeUndefined()
+  })
+
+  it('对 x-opencode-session 做 sanitize', () => {
+    expect(resolveHeaderTemplates({
+      [SESSION_AFFINITY_HEADER]: 'raw|${conversationId}|id',
+    }, { conversationId: 'a/b' })).toEqual({
+      [SESSION_AFFINITY_HEADER]: 'raw_a_b_id',
+    })
+  })
+})
+
+describe('buildTemplatedRequestHeaders', () => {
+  it('只解析模板头，忽略静态头', () => {
+    expect(buildTemplatedRequestHeaders({
+      'User-Agent': 'Cursor++/test',
+      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+    }, { conversationId: 'conv-1' })).toEqual({
+      [SESSION_AFFINITY_HEADER]: 'conv-1',
+    })
   })
 })
 
@@ -70,9 +98,7 @@ describe('buildDefaultHeaders + User-Agent', () => {
   it('自定义 User-Agent 覆盖默认值', () => {
     const headers = buildDefaultHeaders('openai-responses', {
       'User-Agent': 'Cursor++/0.0.15 (ccursor; test)',
-      [SESSION_AFFINITY_HEADER]: 'static-ok',
     })
     expect(headers?.['User-Agent']).toBe('Cursor++/0.0.15 (ccursor; test)')
-    expect(headers?.[SESSION_AFFINITY_HEADER]).toBe('static-ok')
   })
 })

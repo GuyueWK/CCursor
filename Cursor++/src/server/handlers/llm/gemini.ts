@@ -10,7 +10,7 @@ import { logger } from '../../logger';
 import type { LLMProvider, LLMStreamRequest, LLMStreamEvent } from './types';
 import { encodeGeminiRequestMessages, encodeGeminiTools } from './conversationCodec';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders } from './userAgent';
+import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent';
 
 function mapThinkingLevelToGemini(level: NonNullable<LLMStreamRequest['thinkingLevel']>): ThinkingLevel {
     switch (level) {
@@ -26,8 +26,10 @@ function mapThinkingLevelToGemini(level: NonNullable<LLMStreamRequest['thinkingL
 export class GeminiProvider implements LLMProvider {
     readonly name = 'gemini';
     private client: GoogleGenAI;
+    private customHeaders?: Record<string, string>;
 
     constructor(entry: ProviderEntry) {
+        this.customHeaders = entry.headers;
         const opts: ConstructorParameters<typeof GoogleGenAI>[0] = {
             apiKey: entry.auth.value,
         };
@@ -53,8 +55,10 @@ export class GeminiProvider implements LLMProvider {
         }
         const encoded = encodeGeminiRequestMessages(transformed);
 
+        const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders);
         const genConfig: GenerateContentConfig = {
             maxOutputTokens: request.maxTokens ?? 8192,
+            ...(sessionHeaders ? { httpOptions: { headers: sessionHeaders } } : {}),
         };
 
         if (encoded.systemInstruction) {

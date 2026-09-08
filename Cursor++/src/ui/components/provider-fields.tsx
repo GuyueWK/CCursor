@@ -102,7 +102,7 @@ export function ProviderFields() {
       <div class="field">
         <label>
           {'Custom Headers (optional, JSON) '}
-          <span style="opacity:.55;font-weight:normal;font-size:0.85em">e.g. anthropic-beta</span>
+          <span style="opacity:.55;font-weight:normal;font-size:0.85em">User-Agent; x-opencode-session is set per conversation automatically</span>
         </label>
         <textarea
           rows={2}
@@ -110,7 +110,7 @@ export function ProviderFields() {
           {...{ 'x-effect': 'if(document.activeElement !== $el) $el.value = $store.app.formatHeaders(p.id)' }}
           {...{ 'x-on:input': '$store.app.updateHeaders(p.id, $event.target.value)' }}
           {...{ 'x-bind:class': '{ \'invalid\': $store.app.headersInvalid[p.id] }' }}
-          placeholder={'{"anthropic-beta": "interleaved-thinking-2025-05-14"}'}
+          placeholder={'{"User-Agent": "Cursor++/0.0.15 (ccursor)"}'}
         >
         </textarea>
         <div class="err" {...{ 'x-show': '$store.app.headersInvalid[p.id]' }}>Invalid JSON</div>

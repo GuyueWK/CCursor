@@ -12,6 +12,13 @@ const AUTH_KINDS = [
   { value: 'token', label: 'Bearer Token' },
 ]
 
+const HEADERS_PLACEHOLDER = [
+  '{',
+  '  "User-Agent": "Cursor++/0.0.15 (ccursor)",',
+  '  "x-opencode-session": "${' + 'conversationId}"',
+  '}',
+].join('\n')
+
 /** Provider 表单字段 — 在 provider accordion body 内, x-for p 作用域 */
 export function ProviderFields() {
   return (
@@ -96,7 +103,9 @@ export function ProviderFields() {
       <div class="field">
         <label>
           {'Custom Headers (optional, JSON) '}
-          <span style="opacity:.55;font-weight:normal;font-size:0.85em">supports ${'{'}conversationId{'}'}</span>
+          <span style="opacity:.55;font-weight:normal;font-size:0.85em">
+            supports $&#123;conversationId&#125;
+          </span>
         </label>
         <textarea
           rows={2}
@@ -104,7 +113,7 @@ export function ProviderFields() {
           {...{ 'x-effect': 'if(document.activeElement !== $el) $el.value = $store.app.formatHeaders(p.id)' }}
           {...{ 'x-on:input': '$store.app.updateHeaders(p.id, $event.target.value)' }}
           {...{ 'x-bind:class': '{ \'invalid\': $store.app.headersInvalid[p.id] }' }}
-          placeholder={'{"User-Agent": "Cursor++/0.0.15 (ccursor)", "x-opencode-session": "${conversationId}"}'}
+          placeholder={HEADERS_PLACEHOLDER}
         >
         </textarea>
         <div class="err" {...{ 'x-show': '$store.app.headersInvalid[p.id]' }}>Invalid JSON</div>

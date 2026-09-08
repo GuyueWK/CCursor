@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
-  SESSION_AFFINITY_HEADER,
   buildDefaultHeaders,
   buildTemplatedRequestHeaders,
   headerValueHasTemplate,
   partitionCustomHeaders,
   resolveHeaderTemplates,
   sanitizeSessionId,
+  SESSION_AFFINITY_HEADER,
 } from '../handlers/llm/userAgent'
+
+/** Literal `${conversationId}` without triggering no-template-curly-in-string. */
+const CONVERSATION_ID_TEMPLATE = '${' + 'conversationId}'
 
 describe('sanitizeSessionId', () => {
   it('保留安全字符并裁剪空白', () => {
@@ -32,7 +35,7 @@ describe('partitionCustomHeaders', () => {
   it('把模板头和静态头分开', () => {
     const { staticHeaders, templatedHeaders } = partitionCustomHeaders({
       'User-Agent': 'Cursor++/test',
-      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      [SESSION_AFFINITY_HEADER]: CONVERSATION_ID_TEMPLATE,
       'X-Debug': 'static',
     })
     expect(staticHeaders).toEqual({
@@ -40,22 +43,23 @@ describe('partitionCustomHeaders', () => {
       'X-Debug': 'static',
     })
     expect(templatedHeaders).toEqual({
-      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      [SESSION_AFFINITY_HEADER]: CONVERSATION_ID_TEMPLATE,
     })
   })
 
   it('headerValueHasTemplate 识别占位符', () => {
-    expect(headerValueHasTemplate('${conversationId}')).toBe(true)
-    expect(headerValueHasTemplate('prefix-${conversationId}-suffix')).toBe(true)
+    expect(headerValueHasTemplate(CONVERSATION_ID_TEMPLATE)).toBe(true)
+    expect(headerValueHasTemplate(`prefix-${CONVERSATION_ID_TEMPLATE.slice(2)}`)).toBe(true)
+    expect(headerValueHasTemplate('prefix-' + CONVERSATION_ID_TEMPLATE + '-suffix')).toBe(true)
     expect(headerValueHasTemplate('no-template')).toBe(false)
   })
 })
 
 describe('resolveHeaderTemplates', () => {
-  it('解析 ${conversationId}', () => {
+  it('解析 conversationId 模板', () => {
     expect(resolveHeaderTemplates({
-      [SESSION_AFFINITY_HEADER]: '${conversationId}',
-      'X-Trace': 'chat/${conversationId}/v1',
+      [SESSION_AFFINITY_HEADER]: CONVERSATION_ID_TEMPLATE,
+      'X-Trace': 'chat/' + CONVERSATION_ID_TEMPLATE + '/v1',
     }, { conversationId: 'conv-live' })).toEqual({
       [SESSION_AFFINITY_HEADER]: 'conv-live',
       'X-Trace': 'chat/conv-live/v1',
@@ -64,19 +68,19 @@ describe('resolveHeaderTemplates', () => {
 
   it('conversationId 缺失时省略仅依赖它的头', () => {
     expect(resolveHeaderTemplates({
-      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      [SESSION_AFFINITY_HEADER]: CONVERSATION_ID_TEMPLATE,
     }, {})).toBeUndefined()
   })
 
   it('未知变量展开为空', () => {
     expect(resolveHeaderTemplates({
-      'X-Foo': '${unknownVar}',
+      'X-Foo': '${' + 'unknownVar}',
     }, { conversationId: 'c1' })).toBeUndefined()
   })
 
   it('对 x-opencode-session 做 sanitize', () => {
     expect(resolveHeaderTemplates({
-      [SESSION_AFFINITY_HEADER]: 'raw|${conversationId}|id',
+      [SESSION_AFFINITY_HEADER]: 'raw|' + CONVERSATION_ID_TEMPLATE + '|id',
     }, { conversationId: 'a/b' })).toEqual({
       [SESSION_AFFINITY_HEADER]: 'raw_a_b_id',
     })
@@ -87,7 +91,7 @@ describe('buildTemplatedRequestHeaders', () => {
   it('只解析模板头，忽略静态头', () => {
     expect(buildTemplatedRequestHeaders({
       'User-Agent': 'Cursor++/test',
-      [SESSION_AFFINITY_HEADER]: '${conversationId}',
+      [SESSION_AFFINITY_HEADER]: CONVERSATION_ID_TEMPLATE,
     }, { conversationId: 'conv-1' })).toEqual({
       [SESSION_AFFINITY_HEADER]: 'conv-1',
     })

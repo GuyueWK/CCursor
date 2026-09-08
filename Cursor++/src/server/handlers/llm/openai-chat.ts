@@ -12,7 +12,7 @@ import type { LLMProvider, LLMStreamRequest, LLMStreamEvent } from './types';
 import { encodeOpenAIRequestMessages, encodeOpenAITools } from './conversationCodec';
 import { createProxiedFetch } from './proxyFetch';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent';
+import { buildDefaultHeaders, buildTemplatedRequestHeaders, partitionCustomHeaders } from './userAgent';
 
 export class OpenAIChatProvider implements LLMProvider {
     readonly name = 'openai-chat';
@@ -28,7 +28,8 @@ export class OpenAIChatProvider implements LLMProvider {
             opts.baseURL = entry.baseUrl;
         }
         opts.fetch = createProxiedFetch(entry.proxyUrl);
-        const headers = buildDefaultHeaders('openai-chat', entry.headers);
+        const { staticHeaders } = partitionCustomHeaders(entry.headers);
+        const headers = buildDefaultHeaders('openai-chat', staticHeaders);
         if (headers) {
             opts.defaultHeaders = headers;
         }
@@ -64,10 +65,12 @@ export class OpenAIChatProvider implements LLMProvider {
             params.reasoning_effort = request.thinkingLevel;
         }
 
-        const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders);
+        const templatedHeaders = buildTemplatedRequestHeaders(this.customHeaders, {
+            conversationId: request.conversationId,
+        });
         const stream = await this.client.chat.completions.create(
             params,
-            sessionHeaders ? { headers: sessionHeaders } : undefined,
+            templatedHeaders ? { headers: templatedHeaders } : undefined,
         );
 
         const toolCalls = new Map<number, { id: string; name: string; args: string }>();

@@ -20,7 +20,7 @@ import { logger } from '../../logger'
 import { encodeResponsesInput, encodeResponsesTools } from './conversationCodec'
 import { createProxiedFetch } from './proxyFetch'
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages'
-import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent'
+import { buildDefaultHeaders, buildTemplatedRequestHeaders, partitionCustomHeaders } from './userAgent'
 import type { LLMProvider, LLMStreamEvent, LLMStreamRequest } from './types'
 
 export class OpenAIResponsesProvider implements LLMProvider {
@@ -37,7 +37,8 @@ export class OpenAIResponsesProvider implements LLMProvider {
       opts.baseURL = entry.baseUrl
     }
     opts.fetch = createProxiedFetch(entry.proxyUrl)
-    const headers = buildDefaultHeaders('openai-responses', entry.headers)
+    const { staticHeaders } = partitionCustomHeaders(entry.headers)
+    const headers = buildDefaultHeaders('openai-responses', staticHeaders)
     if (headers) {
       opts.defaultHeaders = headers
     }
@@ -87,10 +88,12 @@ export class OpenAIResponsesProvider implements LLMProvider {
       params.include = ['reasoning.encrypted_content']
     }
 
-    const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders)
+    const templatedHeaders = buildTemplatedRequestHeaders(this.customHeaders, {
+      conversationId: request.conversationId,
+    })
     const stream = await this.client.responses.create(
       params,
-      sessionHeaders ? { headers: sessionHeaders } : undefined,
+      templatedHeaders ? { headers: templatedHeaders } : undefined,
     )
 
     // 跟踪活跃的 function_call items (item_id → { callId, name, hadDeltas })

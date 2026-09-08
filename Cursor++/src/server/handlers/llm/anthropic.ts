@@ -27,7 +27,7 @@ import { applyAnthropicCacheBreakpoints, encodeAnthropicRequestMessages, encodeA
 import { logger } from '../../logger';
 import { createProxiedFetch } from './proxyFetch';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders, buildSessionAffinityRequestHeaders } from './userAgent';
+import { buildDefaultHeaders, buildTemplatedRequestHeaders, partitionCustomHeaders } from './userAgent';
 
 type AnthropicEffort = 'low' | 'medium' | 'high' | 'max';
 
@@ -62,7 +62,8 @@ export class AnthropicProvider implements LLMProvider {
 
         opts.fetch = createProxiedFetch(entry.proxyUrl);
 
-        const headers = buildDefaultHeaders('anthropic', entry.headers);
+        const { staticHeaders } = partitionCustomHeaders(entry.headers);
+        const headers = buildDefaultHeaders('anthropic', staticHeaders);
         if (headers) {
             opts.defaultHeaders = headers;
         }
@@ -135,8 +136,10 @@ export class AnthropicProvider implements LLMProvider {
         if (request.anthropicBetas)
             betas.push(...request.anthropicBetas.filter(b => !betas.includes(b)));
 
-        const sessionHeaders = buildSessionAffinityRequestHeaders(request.conversationId, this.customHeaders);
-        const requestOptions = sessionHeaders ? { headers: sessionHeaders } : undefined;
+        const templatedHeaders = buildTemplatedRequestHeaders(this.customHeaders, {
+            conversationId: request.conversationId,
+        });
+        const requestOptions = templatedHeaders ? { headers: templatedHeaders } : undefined;
         const stream = betas.length > 0
             ? this.client.beta.messages.stream({ ...params, betas } as any, requestOptions)
             : this.client.messages.stream(params, requestOptions);

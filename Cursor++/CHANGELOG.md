@@ -8,7 +8,10 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 
 ### Added
 
-- Per-conversation `x-opencode-session` header: when `conversationId` is present on an LLM request, all providers (openai-chat / openai-responses / anthropic / gemini) send a sanitized session affinity header for gateway sticky routing and prompt-cache affinity (OpenCode Go and similar). Static `ProviderEntry.headers` remain supported; live conversationId wins over a static `x-opencode-session`. Custom `User-Agent` is unchanged.
+- Header value templates in `ProviderEntry.headers`: use `${conversationId}` (resolved per LLM request). Example for OpenCode Go:
+  `{"User-Agent": "Cursor++/0.0.15 (ccursor)", "x-opencode-session": "${conversationId}"}`.
+  Templated headers are applied per request; static headers remain on the SDK client.
+  Empty expansions are omitted. `x-opencode-session` values are sanitized (≤128 safe chars).
 
 ## [0.0.7]
 

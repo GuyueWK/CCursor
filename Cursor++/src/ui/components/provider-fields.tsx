@@ -26,12 +26,6 @@ export function ProviderFields() {
         />
         <div class="err" x-show="$store.app.validate(p.id).errors.name" x-text="$store.app.validate(p.id).errors.name"></div>
       </div>
-      {/*
-        Type + Auth Kind 行:
-          - Anthropic 同时支持 x-api-key 和 Bearer token, 显示下拉
-          - openai-chat / openai-responses / gemini 只有 apiKey, Auth Kind 字段隐藏,
-            Type 下拉占满整行
-      */}
       <div class="field-row" x-show="$store.app.getDraft(p.id).type === 'anthropic'">
         <div class="field">
           <label>Type</label>
@@ -102,7 +96,7 @@ export function ProviderFields() {
       <div class="field">
         <label>
           {'Custom Headers (optional, JSON) '}
-          <span style="opacity:.55;font-weight:normal;font-size:0.85em">User-Agent; x-opencode-session is set per conversation automatically</span>
+          <span style="opacity:.55;font-weight:normal;font-size:0.85em">supports ${'{'}conversationId{'}'}</span>
         </label>
         <textarea
           rows={2}
@@ -110,7 +104,7 @@ export function ProviderFields() {
           {...{ 'x-effect': 'if(document.activeElement !== $el) $el.value = $store.app.formatHeaders(p.id)' }}
           {...{ 'x-on:input': '$store.app.updateHeaders(p.id, $event.target.value)' }}
           {...{ 'x-bind:class': '{ \'invalid\': $store.app.headersInvalid[p.id] }' }}
-          placeholder={'{"User-Agent": "Cursor++/0.0.15 (ccursor)"}'}
+          placeholder={'{"User-Agent": "Cursor++/0.0.15 (ccursor)", "x-opencode-session": "${conversationId}"}'}
         >
         </textarea>
         <div class="err" {...{ 'x-show': '$store.app.headersInvalid[p.id]' }}>Invalid JSON</div>

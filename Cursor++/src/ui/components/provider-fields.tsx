@@ -33,6 +33,12 @@ export function ProviderFields() {
         />
         <div class="err" x-show="$store.app.validate(p.id).errors.name" x-text="$store.app.validate(p.id).errors.name"></div>
       </div>
+      {/*
+        Type + Auth Kind 行:
+          - Anthropic 同时支持 x-api-key 和 Bearer token, 显示下拉
+          - openai-chat / openai-responses / gemini 只有 apiKey, Auth Kind 字段隐藏,
+            Type 下拉占满整行
+      */}
       <div class="field-row" x-show="$store.app.getDraft(p.id).type === 'anthropic'">
         <div class="field">
           <label>Type</label>

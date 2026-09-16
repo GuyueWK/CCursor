@@ -238,16 +238,20 @@ export interface ProviderEntry {
    */
   proxyUrl?: string
   /**
-   * 自定义请求头 — 作为 SDK defaultHeaders 附加到 LLM 请求。
+   * 自定义请求头 — 静态值进 SDK defaultHeaders；含 `${...}` 模板的按每次请求解析。
    *
    * 用途:
    *   - Anthropic: anthropic-beta (interleaved-thinking, prompt-caching-scope 等)
    *   - OpenAI: 自定义 header (如 Helicone 等代理网关需要的 key)
    *   - User-Agent: 覆盖默认 UA (明确标识客户端)
-   *   - x-opencode-session: 仅作无 conversationId 时的静态回退；
-   *     有 conversationId 时由运行时按会话动态注入并覆盖此静态值
+   *   - x-opencode-session: 如需会话亲和，需显式配置模板值
+   *     `"x-opencode-session": "${conversationId}"`；无 conversationId 时该头省略，
+   *     不会自动注入。静态写死的 x-opencode-session 会原样发送（不推荐）。
    *
-   * 示例: { "User-Agent": "Cursor++/0.0.15 (ccursor)", "anthropic-beta": "..." }
+   * 模板变量目前仅支持 `${conversationId}`（每次 LLM 请求时解析）；
+   * 未知变量展开为空并记 warn，解析后为空的头会被省略。
+   *
+   * 示例: { "User-Agent": "Cursor++/<version> (ccursor)", "x-opencode-session": "${conversationId}" }
    */
   headers?: Record<string, string>
 }

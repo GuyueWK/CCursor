@@ -10,7 +10,7 @@ import { logger } from '../../logger';
 import type { LLMProvider, LLMStreamRequest, LLMStreamEvent } from './types';
 import { encodeGeminiRequestMessages, encodeGeminiTools } from './conversationCodec';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders, buildTemplatedRequestHeaders, partitionCustomHeaders } from './userAgent';
+import { buildDefaultHeaders, partitionCustomHeaders, resolveHeaderTemplates } from './userAgent';
 
 function mapThinkingLevelToGemini(level: NonNullable<LLMStreamRequest['thinkingLevel']>): ThinkingLevel {
     switch (level) {
@@ -26,14 +26,18 @@ function mapThinkingLevelToGemini(level: NonNullable<LLMStreamRequest['thinkingL
 export class GeminiProvider implements LLMProvider {
     readonly name = 'gemini';
     private client: GoogleGenAI;
-    private customHeaders?: Record<string, string>;
+    // Snapshots of entry.headers split at construction (copied, not referenced).
+    private staticHeaders: Record<string, string> = {};
+    private templatedHeaderTemplates: Record<string, string> = {};
 
     constructor(entry: ProviderEntry) {
-        this.customHeaders = entry.headers;
+        const customHeadersCopy = entry.headers ? { ...entry.headers } : undefined;
         const opts: ConstructorParameters<typeof GoogleGenAI>[0] = {
             apiKey: entry.auth.value,
         };
-        const { staticHeaders } = partitionCustomHeaders(entry.headers);
+        const { staticHeaders, templatedHeaders } = partitionCustomHeaders(customHeadersCopy);
+        this.staticHeaders = staticHeaders;
+        this.templatedHeaderTemplates = templatedHeaders;
         const headers = buildDefaultHeaders('gemini', staticHeaders);
         if (entry.baseUrl || headers) {
             opts.httpOptions = {
@@ -56,12 +60,18 @@ export class GeminiProvider implements LLMProvider {
         }
         const encoded = encodeGeminiRequestMessages(transformed);
 
-        const templatedHeaders = buildTemplatedRequestHeaders(this.customHeaders, {
+        const templatedHeaders = resolveHeaderTemplates(this.templatedHeaderTemplates, {
             conversationId: request.conversationId,
         });
+        // @google/genai merges per-request httpOptions.headers over the client
+        // headers (patchHttpOptions, shallow merge), but merge explicitly here
+        // so static headers survive even if the SDK merge semantics change.
+        const requestHeaders = templatedHeaders
+            ? { ...this.staticHeaders, ...templatedHeaders }
+            : undefined;
         const genConfig: GenerateContentConfig = {
             maxOutputTokens: request.maxTokens ?? 8192,
-            ...(templatedHeaders ? { httpOptions: { headers: templatedHeaders } } : {}),
+            ...(requestHeaders ? { httpOptions: { headers: requestHeaders } } : {}),
         };
 
         if (encoded.systemInstruction) {

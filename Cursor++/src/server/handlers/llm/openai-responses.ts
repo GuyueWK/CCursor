@@ -20,16 +20,17 @@ import { logger } from '../../logger'
 import { encodeResponsesInput, encodeResponsesTools } from './conversationCodec'
 import { createProxiedFetch } from './proxyFetch'
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages'
-import { buildDefaultHeaders, buildTemplatedRequestHeaders, partitionCustomHeaders } from './userAgent'
+import { buildDefaultHeaders, partitionCustomHeaders, resolveHeaderTemplates } from './userAgent'
 import type { LLMProvider, LLMStreamEvent, LLMStreamRequest } from './types'
 
 export class OpenAIResponsesProvider implements LLMProvider {
   readonly name = 'openai-responses'
   private client: OpenAI
-  private customHeaders?: Record<string, string>
+  // Snapshot of the templated subset of entry.headers (copied at construction).
+  private templatedHeaderTemplates?: Record<string, string>
 
   constructor(entry: ProviderEntry) {
-    this.customHeaders = entry.headers
+    const customHeadersCopy = entry.headers ? { ...entry.headers } : undefined
     const opts: ConstructorParameters<typeof OpenAI>[0] = {
       apiKey: entry.auth.value,
     }
@@ -37,7 +38,8 @@ export class OpenAIResponsesProvider implements LLMProvider {
       opts.baseURL = entry.baseUrl
     }
     opts.fetch = createProxiedFetch(entry.proxyUrl)
-    const { staticHeaders } = partitionCustomHeaders(entry.headers)
+    const { staticHeaders, templatedHeaders } = partitionCustomHeaders(customHeadersCopy)
+    this.templatedHeaderTemplates = templatedHeaders
     const headers = buildDefaultHeaders('openai-responses', staticHeaders)
     if (headers) {
       opts.defaultHeaders = headers
@@ -88,7 +90,9 @@ export class OpenAIResponsesProvider implements LLMProvider {
       params.include = ['reasoning.encrypted_content']
     }
 
-    const templatedHeaders = buildTemplatedRequestHeaders(this.customHeaders, {
+    // prompt_cache_key targets OpenAI-side prefix caching; the templated
+    // `x-opencode-session` header below targets gateway stickiness — orthogonal.
+    const templatedHeaders = resolveHeaderTemplates(this.templatedHeaderTemplates, {
       conversationId: request.conversationId,
     })
     const stream = await this.client.responses.create(

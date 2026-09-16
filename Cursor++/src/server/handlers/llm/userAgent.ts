@@ -12,10 +12,12 @@
  *   Custom header values may include `${conversationId}` (and future vars).
  *   Templated headers are resolved per LLM request; static headers stay on
  *   the SDK client as defaultHeaders. Example for OpenCode Go:
- *     { "User-Agent": "Cursor++/0.0.15 (ccursor)", "x-opencode-session": "${conversationId}" }
+ *     { "x-opencode-session": "${conversationId}" }
+ *   plus optional static headers like `{ "User-Agent": "Cursor++/<version> (ccursor)" }`.
  */
 import os from 'node:os'
 import type { ProviderType } from '../../data/defaults'
+import { logger } from '../../logger'
 
 const CLAUDE_CODE_VERSION = '2.1.154'
 const CODEX_VERSION = '0.133.0'
@@ -24,6 +26,9 @@ const CODEX_VERSION = '0.133.0'
 export const SESSION_AFFINITY_HEADER = 'x-opencode-session'
 
 const SESSION_HEADER_MAX_LEN = 128
+// Detection regex is intentionally non-global so `test()` stays stateless
+// (a shared `/g` regex would carry `lastIndex` between calls).
+const HEADER_TEMPLATE_DETECT_RE = /\$\{[a-zA-Z_][a-zA-Z0-9_]*\}/
 const HEADER_TEMPLATE_RE = /\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g
 
 export interface HeaderResolveContext {
@@ -60,7 +65,13 @@ export function buildDefaultHeaders(
     return Object.keys(headers).length > 0 ? headers : undefined
 }
 
-/** Sanitize an opaque session id for use as x-opencode-session (clamp ≤128). */
+/**
+ * Sanitize an opaque session id for use as x-opencode-session (clamp ≤128).
+ *
+ * Unsafe runs collapse to a single underscore; leading/trailing underscores
+ * are trimmed, so e.g. `"_abc_"` becomes `"abc"`. For opaque ids this is
+ * fine, but callers should not rely on round-trip fidelity.
+ */
 export function sanitizeSessionId(id: string): string {
     const trimmed = id.trim()
     if (!trimmed) return ''
@@ -69,8 +80,7 @@ export function sanitizeSessionId(id: string): string {
 }
 
 export function headerValueHasTemplate(value: string): boolean {
-    HEADER_TEMPLATE_RE.lastIndex = 0
-    return HEADER_TEMPLATE_RE.test(value)
+    return HEADER_TEMPLATE_DETECT_RE.test(value)
 }
 
 /** Split custom headers into static (client defaultHeaders) vs templated (per-request). */
@@ -98,7 +108,8 @@ function buildTemplateVars(ctx: HeaderResolveContext): Record<string, string> {
 /**
  * Resolve `${var}` placeholders in header values.
  *
- * Unknown vars expand to empty string. Keys whose value is empty after
+ * Unknown vars expand to empty string (and warn, since it is almost always
+ * a typo like `${conversatonId}`). Keys whose value is empty after
  * resolution are omitted (so `${conversationId}` alone is skipped when
  * there is no conversation yet). `x-opencode-session` is sanitized.
  */
@@ -114,7 +125,10 @@ export function resolveHeaderTemplates(
 
     for (const [key, template] of Object.entries(templates)) {
         const resolved = template.replace(HEADER_TEMPLATE_RE, (_match, name: string) => {
-            return Object.prototype.hasOwnProperty.call(vars, name) ? vars[name]! : ''
+            if (Object.prototype.hasOwnProperty.call(vars, name))
+                return vars[name]!
+            logger.warn({ headerKey: key, varName: name, template }, '[HEADERS] unknown template variable expanded to empty string')
+            return ''
         })
         let value = resolved.trim()
         if (key.toLowerCase() === SESSION_AFFINITY_HEADER)

@@ -23,6 +23,7 @@ export interface CompactionArtifacts {
     summaryText: string;
     summaryBlobId: string;
     summaryBlobData: string;
+    summaryBlobDataRaw?: Uint8Array;
     archiveBlobs: Array<{ blobId: string; blobData: string; blobDataRaw?: Uint8Array }>;
     nextRootBlobIds: string[];
     nextSummaryArchiveIds: string[];
@@ -199,6 +200,7 @@ export function createCompactionArtifacts(params: {
         summaryText: params.summaryText,
         summaryBlobId: summaryBlob.blobId,
         summaryBlobData: summaryBlob.blobData,
+        summaryBlobDataRaw: summaryBlob.blobDataRaw,
         archiveBlobs,
         nextRootBlobIds: [
             ...params.plan.leading.map(entry => entry.blobId),

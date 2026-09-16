@@ -1,7 +1,7 @@
 import type { AgentServerMessage } from '../../gen/agent_v1_pb'
 import type { LLMContentBlock, LLMMessage } from '../llm/types'
 import { logger } from '../../logger'
-import { decodeBlob, encodeBlob } from './blob'
+import { cachedBlobPayloadBytes, decodeBlob, encodeBlob, isJsonBlobPayload } from './blob'
 import { cacheBlob, getCachedBlob } from './blobStore'
 import { normalizeBlobMessage, restoreBlobMessageToLLMMessage } from './transcript'
 import { createRepairDiagnostics, hasRepairMutations, repairConversationHistory, type RepairDiagnostics } from '../llm/transformMessages'
@@ -16,8 +16,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object'
 }
 
+type BuildKvMessage = (id: number, blobId: string, blobData: string, blobDataRaw?: Uint8Array) => AgentServerMessage
+
+const rewrittenJsonBlobConversations = new Set<string>()
+
+export function resetJsonBlobRewriteForTests(): void {
+  rewrittenJsonBlobConversations.clear()
+}
+
+/**
+ * 把 cache 里的 JSON 历史 blob 按官方 UTF-8 JSON 再写一遍客户端。
+ * 旧 BYOK 会话存的是 base64 文本,切回官方会 JSON.parse 失败;同一 conversation
+ * 在本进程里只修一次,避免每轮重传整段历史。
+ */
+export function* rewriteCachedJsonBlobsForOfficialClient(
+  buildKvMessage: BuildKvMessage,
+  conversationId: string,
+  blobIds: string[],
+  startCounter: number,
+): Generator<AgentServerMessage, number, void> {
+  if (!conversationId || blobIds.length === 0 || rewrittenJsonBlobConversations.has(conversationId))
+    return startCounter
+
+  let counter = startCounter
+  let rewritten = 0
+  for (const blobId of blobIds) {
+    const blobData = getCachedBlob(blobId)
+    if (!blobData)
+      continue
+    const raw = cachedBlobPayloadBytes(blobData)
+    if (!isJsonBlobPayload(raw))
+      continue
+    yield buildKvMessage(++counter, blobId, blobData, raw)
+    rewritten++
+  }
+  rewrittenJsonBlobConversations.add(conversationId)
+  if (rewritten > 0) {
+    logger.info({ conversationId, rewritten, total: blobIds.length }, '[SESSION] rewrote JSON history blobs as utf-8 for official client')
+  }
+  return counter
+}
+
 export function* sendAndCacheBlob(
-  buildKvMessage: (id: number, blobId: string, blobData: string) => AgentServerMessage,
+  buildKvMessage: BuildKvMessage,
   id: number,
   data: { role: string, content: unknown, toolCallId?: string, toolName?: string, isError?: boolean, providerOptions?: Record<string, unknown> },
   blobIds: string[],
@@ -26,11 +67,11 @@ export function* sendAndCacheBlob(
   const blob = encodeBlob(normalized)
   blobIds.push(blob.blobId)
   cacheBlob(blob.blobId, blob.blobData)
-  yield buildKvMessage(id, blob.blobId, blob.blobData)
+  yield buildKvMessage(id, blob.blobId, blob.blobData, blob.blobDataRaw)
 }
 
 export function* flushMessageBlobs(
-  buildKvMessage: (id: number, blobId: string, blobData: string) => AgentServerMessage,
+  buildKvMessage: BuildKvMessage,
   messages: LLMMessage[],
   startIndex: number,
   blobCounter: number,

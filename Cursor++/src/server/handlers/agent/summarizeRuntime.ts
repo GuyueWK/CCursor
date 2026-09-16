@@ -196,7 +196,7 @@ export async function* handleSummarizeAction(
         previousSummaryArchiveIds: parsed.historySummaryArchiveIds,
     });
 
-    yield kvMessage(1, artifacts.summaryBlobId, artifacts.summaryBlobData);
+    yield kvMessage(1, artifacts.summaryBlobId, artifacts.summaryBlobData, artifacts.summaryBlobDataRaw);
     for (const [index, archiveBlob] of artifacts.archiveBlobs.entries()) {
         yield kvMessage(2 + index, archiveBlob.blobId, archiveBlob.blobData, archiveBlob.blobDataRaw);
     }

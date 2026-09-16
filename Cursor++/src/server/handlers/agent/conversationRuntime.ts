@@ -12,7 +12,7 @@ import { cacheBlob, getCachedBlob } from './blobStore'
 import { emitFinalCheckpoint, emitRollingCheckpoint } from './checkpointManager'
 import { ContextTokenTracker } from './tokenCounter'
 import { createCompactionArtifacts, estimateMessagesTokens, formatMessageForSummary, planCompaction } from './compactionStrategy'
-import { extractPlainTextContent, flushMessageBlobs, hydrateHistoryEntries, rebuildConversationHistory, repairHistoryEntries, sendAndCacheBlob } from './historyManager'
+import { extractPlainTextContent, flushMessageBlobs, hydrateHistoryEntries, rebuildConversationHistory, repairHistoryEntries, rewriteCachedJsonBlobsForOfficialClient, sendAndCacheBlob } from './historyManager'
 import { buildMessages, workspaceUris } from './protocol'
 import { checkpoint, editToolCallStreamDelta, heartbeat, kvMessage, partialToolCall, summary, summaryCompleted, summaryStarted, translateStream, userMessageAppended } from './stream'
 import { buildSummaryUserMessage, SUMMARY_SYSTEM_PROMPT } from './summaryPrompt'
@@ -597,7 +597,7 @@ async function* performInlineAutoSummarize(params: {
     previousSummaryArchiveIds: summaryArchiveIds,
   })
 
-  yield kvMessage(1, artifacts.summaryBlobId, artifacts.summaryBlobData)
+  yield kvMessage(1, artifacts.summaryBlobId, artifacts.summaryBlobData, artifacts.summaryBlobDataRaw)
   for (const [index, archiveBlob] of artifacts.archiveBlobs.entries()) {
     yield kvMessage(2 + index, archiveBlob.blobId, archiveBlob.blobData, archiveBlob.blobDataRaw)
   }
@@ -884,6 +884,15 @@ export async function* handleConversationRun(
   }
 
   yield heartbeat()
+
+  if (parsed.historyBlobIds.length > 0) {
+    blobCounter = yield* rewriteCachedJsonBlobsForOfficialClient(
+      kvMessage,
+      parsed.conversationId,
+      parsed.historyBlobIds,
+      blobCounter,
+    )
+  }
 
   if (parsed.isBackgroundTaskCompletion) {
     const completion = parsed.backgroundTaskCompletions[0]

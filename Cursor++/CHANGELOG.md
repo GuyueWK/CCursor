@@ -4,6 +4,16 @@ All notable changes to the Cursor++ BYOK extension are documented here.
 
 Format follows [Keep a Changelog](http://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- Conversation JSON blobs are stored as UTF-8 `{"role":...}` on the client KV
+  (matching official `JSON.parse`). BYOK previously wrote the base64 text of
+  that JSON, so toggling BYOK off and continuing the same chat failed with
+  `Unexpected token 'e', "eyJyb2xlIj"... is not valid JSON`. Existing chats are
+  rewritten on the next BYOK turn.
+
 ## [0.0.7]
 
 ### Added

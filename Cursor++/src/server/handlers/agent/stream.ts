@@ -469,11 +469,12 @@ export function kvGetBlob(id: number, blobId: Uint8Array): AgentServerMessage {
  * - 首个 ordered blob 从 id=1 开始
  *
  * blobData 分两种场景:
- *   - JSON blob (encodeBlob): base64 文本 → TextEncoder.encode → 客户端按原样存储
+ *   - JSON blob (encodeBlob): 传 blobDataRaw = UTF-8 JSON 字节。官方客户端
+ *     JSON.parse(utf8(blobData));缺 raw 时回退成 cache 的 base64 文本,官方会挂。
  *   - Protobuf blob (encodeBinaryBlob): blobDataRaw 直接传 raw protobuf bytes，
  *     客户端存 raw bytes，fork 时 fromBinary 可直接解析
  *
- * blobId 始终存的是 base64 文本的 UTF-8 字节（sha256 hash 的 base64 表示），
+ * blobId 始终存的是 utf-8 字节（sha256 hash 的 base64 表示），
  * 与 checkpoint.turns / turn 内部引用保持一致。
  */
 export function kvMessage(id: number | undefined, blobId: string, blobData: string, blobDataRaw?: Uint8Array): AgentServerMessage {

@@ -55,6 +55,9 @@ function rebuildIndex(config: ProvidersConfig): Map<string, ResolvedProviderMode
 function withFallback(loaded: Partial<ProvidersConfig> | null): ProvidersConfig {
   if (!loaded || !Array.isArray(loaded.providers))
     return clone(DEFAULT_PROVIDERS)
+  const autoReviewModelId = typeof loaded.autoReviewModelId === 'string'
+    ? loaded.autoReviewModelId.trim()
+    : ''
   return {
     $schemaVersion: loaded.$schemaVersion ?? DEFAULT_PROVIDERS.$schemaVersion,
     providers: loaded.providers.map(p => ({
@@ -67,6 +70,7 @@ function withFallback(loaded: Partial<ProvidersConfig> | null): ProvidersConfig 
       ...(p.proxyUrl ? { proxyUrl: p.proxyUrl } : {}),
       ...(p.headers && typeof p.headers === 'object' && Object.keys(p.headers).length > 0 ? { headers: p.headers } : {}),
     })),
+    ...(autoReviewModelId ? { autoReviewModelId } : {}),
   }
 }
 
@@ -149,6 +153,12 @@ export function flattenModels(): ResolvedProviderModel[] {
 export function getProvider(providerId: string): ProviderEntry | null {
   const config = cache ?? loadProviders()
   return config.providers.find(p => p.id === providerId) ?? null
+}
+
+/** Model id for the local Auto-review classifier; empty → inherit the Agent model. */
+export function getAutoReviewModelId(): string | undefined {
+  const id = (cache ?? loadProviders()).autoReviewModelId
+  return id && id.trim() ? id.trim() : undefined
 }
 
 /** 测试用: 重置缓存 */

@@ -120,6 +120,7 @@ export const DEFAULT_ROUTES = {
  * BYOK Provider 兜底常量 — server 读不到文件 / 文件损坏时的 fallback。
  * 不放任何 provider,避免"假装有配置"造成的歧义。
  * 用户通过 Cursor++ 设置面板或直接编辑 ~/.ccursor/providers.json 添加。
+ * 可选 autoReviewModelId: Auto-review classifier 使用的 model id。
  */
 export const DEFAULT_PROVIDERS = {
   $schemaVersion: 1,

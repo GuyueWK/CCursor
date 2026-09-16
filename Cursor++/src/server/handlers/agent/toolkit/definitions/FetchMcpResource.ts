@@ -89,14 +89,16 @@ export const FetchMcpResourceTool: ToolRegistryEntry = {
         openai: OPENAI,
         gemini: GEMINI,
     },
-    buildStartedArgs: (input) => ({
+    buildStartedArgs: (input, callId) => ({
         server: str(input.server),
         uri: str(input.uri),
+        toolCallId: callId,
         ...(str(input.downloadPath) ? { downloadPath: str(input.downloadPath) } : {}),
     }),
-    buildExecArgs: (input) => ({
+    buildExecArgs: (input, callId) => ({
         server: input.server || '',
         uri: input.uri || '',
+        toolCallId: callId,
         ...(input.downloadPath ? { downloadPath: input.downloadPath } : {}),
     }),
 };

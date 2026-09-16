@@ -4,6 +4,16 @@ All notable changes to the Cursor++ BYOK extension are documented here.
 
 Format follows [Keep a Changelog](http://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Local Auto-review for Cursor Run Mode: allowlist precheck → sandbox when the
+  client supports it → BYOK classifier for remaining Shell / MCP / Fetch calls.
+  Classifier model is selectable in the sidebar (or inherit the current Agent
+  model). Blocked calls return a retry hint so the parent agent can surface the
+  native approval card via `request_smart_mode_approval`.
+
 ## [0.0.7]
 
 ### Added

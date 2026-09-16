@@ -3,6 +3,7 @@ import type { ProviderType } from '../../../data/defaults';
 import type { EditPlan } from './editPlans';
 import type { ToolExecBuildOptions, ToolRegistryEntry } from './types';
 import { toProviderFamily } from './types';
+import { attachSmartModeSchema } from '../autoReview';
 
 // ── 逐工具导入 ──
 import { ShellTool } from './definitions/Shell';
@@ -74,7 +75,7 @@ export function listBuiltinLlmTools(provider: ProviderType): LLMTool[] {
     const family = toProviderFamily(provider);
     return TOOL_REGISTRY.flatMap(entry => {
         const tool = entry.llmToolByProvider[family];
-        return tool ? [tool] : [];
+        return tool ? [attachSmartModeSchema(tool, family)] : [];
     });
 }
 

@@ -439,6 +439,14 @@ function buildAvailableModelFromByok(
     contextTokenLimitForMaxMode: contextLimit,
     supportsPlanMode: true,
     supportsSandboxing: model.supportsSandboxing ?? false,
+    // Auto-review UI gate: the client enables the Auto-review Run Mode only when
+    // at least one AvailableModel has supportsSmartModeClassifier === true
+    // (modelConfigService.hasSmartModeClassifierModel). CCursor runs the
+    // classifier locally (autoReview.ts) on the user's own providers.json model,
+    // so every BYOK model is classifier-capable from the client's perspective.
+    // Without this flag the option stays greyed out in
+    // Settings > Agents > Approvals & Execution under BYOK ON.
+    supportsSmartModeClassifier: true,
     clientDisplayName: model.displayName,
     serverModelName: model.id,
     namedModelSectionIndex: 0,
@@ -452,4 +460,132 @@ function buildAvailableModelFromByok(
 
 export function buildByokAvailableModels(): AvailableModelsResponse_AvailableModel[] {
   return flattenModels().map(({ provider, model }) => buildAvailableModelFromByok(provider, model))
+}
+
+// ── Auto-review classifier stubs ──
+//
+// Background:
+//   The client enables the Auto-review Run Mode only when at least one
+//   AvailableModel carries supportsSmartModeClassifier === true
+//   (modelConfigService.hasSmartModeClassifierModel in the renderer).
+//   The public docs phrase this as "Claude 4.5 Haiku / GPT-5.4 Mini must be
+//   allowed", but on the wire it is purely this boolean flag (field 45).
+//   BYOK previously sent no such model, so the option stayed greyed out in
+//   Settings > Agents > Approvals & Execution under BYOK ON, even though
+//   CCursor implements a local classifier (autoReview.ts).
+//
+// Strategy:
+//   Belt and suspenders:
+//   (1) every BYOK model carries supportsSmartModeClassifier=true, because the
+//       local classifier runs on the user's own providers.json model;
+//   (2) hidden upstream classifier entries are appended when reachable, so the
+//       model list also contains the "real" classifier identities.
+//   Hidden stubs use supportsAgent=false + defaultOn=false so they never pollute
+//   the Agent picker (BYOK cannot serve them — resolveModel would throw
+//   ModelNotFoundError).
+
+/** Best-guess classifier model names (Cursor docs: Claude 4.5 Haiku / GPT-5.4 Mini). */
+export const CLASSIFIER_FALLBACK_MODEL_NAMES: readonly string[] = [
+  'claude-4.5-haiku',
+  'gpt-5.4-mini',
+]
+
+/**
+ * Whether an upstream model name looks like an Auto-review classifier model.
+ *
+ * Intentionally broad (haiku OR mini) so future renames
+ * (haiku-5, mini-2, etc.) still match. Extra matches are harmless —
+ * they become hidden stubs, never selectable for Agent.
+ */
+export function isClassifierModelName(modelName: string): boolean {
+  const normalizedName = modelName.trim().toLowerCase()
+  if (!normalizedName)
+    return false
+  return normalizedName.includes('haiku') || normalizedName.includes('mini')
+}
+
+function buildHiddenVariant(displayName: string): AvailableModelsResponse_AvailableModel['variants'][number] {
+  return create(AvailableModelsResponse_ModelVariantConfigSchema, {
+    displayName,
+    displayNameOutsidePicker: displayName,
+    isMaxMode: false,
+    isDefaultMaxConfig: false,
+    isDefaultNonMaxConfig: false,
+    parameterValues: [],
+    variantStringRepresentation: displayName,
+  })
+}
+
+/** Minimal hidden stubs used when upstream is unreachable (offline / no login). */
+export function buildClassifierFallbackStubModels(): AvailableModelsResponse_AvailableModel[] {
+  const displayNames: Record<string, string> = {
+    'claude-4.5-haiku': 'Claude 4.5 Haiku (Auto-review classifier)',
+    'gpt-5.4-mini': 'GPT-5.4 Mini (Auto-review classifier)',
+  }
+  return CLASSIFIER_FALLBACK_MODEL_NAMES.map(modelName =>
+    create(AvailableModelsResponse_AvailableModelSchema, {
+      name: modelName,
+      defaultOn: false,
+      isUserAdded: false,
+      supportsAgent: false,
+      supportsThinking: false,
+      supportsImages: false,
+      supportsCmdK: false,
+      supportsAutoContext: false,
+      supportsMaxMode: false,
+      supportsNonMaxMode: false,
+      supportsPlanMode: false,
+      supportsSandboxing: false,
+      // The flag the client's hasSmartModeClassifierModel() check looks for.
+      supportsSmartModeClassifier: true,
+      clientDisplayName: displayNames[modelName] ?? `${modelName} (Auto-review classifier)`,
+      serverModelName: modelName,
+      namedModelSectionIndex: 0,
+      degradationStatus: AvailableModelsResponse_DegradationStatus.UNSPECIFIED,
+      parameterDefinitions: [],
+      variants: [buildHiddenVariant(displayNames[modelName] ?? modelName)],
+    }),
+  )
+}
+
+/**
+ * Convert an upstream classifier model into a hidden stub.
+ *
+ * Keeps upstream identity (name / serverModelName / display name) so the
+ * client classifier-availability check passes, but disables Agent selection.
+ */
+export function toHiddenClassifierStubModel(
+  upstreamModel: AvailableModelsResponse_AvailableModel,
+): AvailableModelsResponse_AvailableModel {
+  const displayName = upstreamModel.clientDisplayName ?? upstreamModel.name
+  return create(AvailableModelsResponse_AvailableModelSchema, {
+    name: upstreamModel.name,
+    defaultOn: false,
+    isUserAdded: false,
+    supportsAgent: false,
+    supportsThinking: upstreamModel.supportsThinking ?? false,
+    supportsImages: upstreamModel.supportsImages ?? false,
+    supportsCmdK: false,
+    supportsAutoContext: upstreamModel.supportsAutoContext ?? false,
+    autoContextMaxTokens: upstreamModel.autoContextMaxTokens,
+    autoContextExtendedMaxTokens: upstreamModel.autoContextExtendedMaxTokens,
+    supportsMaxMode: false,
+    supportsNonMaxMode: false,
+    contextTokenLimit: upstreamModel.contextTokenLimit,
+    contextTokenLimitForMaxMode: upstreamModel.contextTokenLimitForMaxMode,
+    clientDisplayName: displayName,
+    serverModelName: upstreamModel.serverModelName ?? upstreamModel.name,
+    namedModelSectionIndex: upstreamModel.namedModelSectionIndex ?? 0,
+    degradationStatus: upstreamModel.degradationStatus ?? AvailableModelsResponse_DegradationStatus.UNSPECIFIED,
+    tooltipData: upstreamModel.tooltipData,
+    tooltipDataForMaxMode: upstreamModel.tooltipDataForMaxMode,
+    supportsPlanMode: false,
+    supportsSandboxing: false,
+    // Preserve the upstream flag; default true so the stub always unlocks the UI.
+    supportsSmartModeClassifier: upstreamModel.supportsSmartModeClassifier ?? true,
+    parameterDefinitions: [],
+    variants: upstreamModel.variants && upstreamModel.variants.length > 0
+      ? upstreamModel.variants
+      : [buildHiddenVariant(displayName)],
+  })
 }

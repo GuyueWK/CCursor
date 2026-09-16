@@ -96,4 +96,8 @@ const TEST_PROVIDERS: ProvidersConfig = {
   ],
 }
 
-setProvidersForTests(TEST_PROVIDERS)
+export function installTestProviders(): void {
+  setProvidersForTests(TEST_PROVIDERS)
+}
+
+installTestProviders()

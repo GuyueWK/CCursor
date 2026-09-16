@@ -29,6 +29,11 @@ describe('turnTracker', () => {
         customSubagents: [],
         disabledTeamRules: [],
         env: {},
+        permissionsAutoRun: {
+          user: { allowInstructions: [], blockInstructions: [] },
+          project: { allowInstructions: [], blockInstructions: [] },
+          admin: { allowInstructions: [], blockInstructions: [] },
+        },
         isGitRepo: false,
         mcpServers: [],
         mcpBasePath: '',

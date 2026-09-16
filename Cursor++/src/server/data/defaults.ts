@@ -253,6 +253,11 @@ export interface ProviderEntry {
 export interface ProvidersConfig {
   $schemaVersion: number
   providers: ProviderEntry[]
+  /**
+   * Model id used by the local Auto-review classifier (Shell / MCP / Fetch).
+   * Empty or omitted → inherit the current Agent model for that turn.
+   */
+  autoReviewModelId?: string
 }
 
 /**

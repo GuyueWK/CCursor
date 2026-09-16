@@ -28,6 +28,7 @@ export interface AppState {
   byokMode: ByokMode
   providers: ProviderEntry[]
   webTools: import('../server/data/defaults').WebToolsConfig
+  autoReviewModelId?: string
   version: string
   fileLogEnabled: boolean
   logFilePath: string
@@ -46,6 +47,7 @@ let current: AppState = {
   version: EXTENSION_VERSION,
   providers: [],
   webTools: { $schemaVersion: 1, search: { providers: [], parallel: false, maxResults: 5 }, fetch: { provider: 'builtin' } },
+  autoReviewModelId: undefined,
   fileLogEnabled: false,
   logFilePath: '',
 }
@@ -143,6 +145,7 @@ export async function refreshState(_secrets?: vscode.SecretStorage): Promise<App
     byokMode,
     providers,
     webTools: getWebTools(),
+    autoReviewModelId: loadProviders().autoReviewModelId,
     version: EXTENSION_VERSION,
     fileLogEnabled: current.fileLogEnabled,
     logFilePath: current.logFilePath,

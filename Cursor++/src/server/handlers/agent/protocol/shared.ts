@@ -29,6 +29,11 @@ export function emptyParsed(): ParsedRunRequest {
     customSubagents: [],
     disabledTeamRules: [],
     env: {},
+    permissionsAutoRun: {
+      user: { allowInstructions: [], blockInstructions: [] },
+      project: { allowInstructions: [], blockInstructions: [] },
+      admin: { allowInstructions: [], blockInstructions: [] },
+    },
     mcpServers: [],
     mcpBasePath: '',
     mcpTools: [],

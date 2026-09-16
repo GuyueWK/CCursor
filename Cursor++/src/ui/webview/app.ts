@@ -129,6 +129,35 @@ export function initApp(Alpine: AlpineType) {
       this.toast('Web tools config saved', 'info')
     },
 
+    autoReviewModelOptions(): Array<{ id: string, label: string }> {
+      const out: Array<{ id: string, label: string }> = []
+      const seen = new Set<string>()
+      for (const p of this.providers || []) {
+        for (const m of p.models || []) {
+          if (!m?.id || seen.has(m.id))
+            continue
+          seen.add(m.id)
+          out.push({
+            id: m.id,
+            label: `${m.displayName || m.apiModel || m.id} (${p.name || p.id})`,
+          })
+        }
+      }
+      return out
+    },
+
+    autoReviewModelLabel(): string {
+      const id = this.state?.autoReviewModelId || ''
+      if (!id)
+        return 'Use current Agent model'
+      const hit = this.autoReviewModelOptions().find((m: { id: string }) => m.id === id)
+      return hit ? hit.label : id
+    },
+
+    setAutoReviewModelId(id: string) {
+      this.post('saveAutoReviewModel', { modelId: id })
+    },
+
     // ── Toast ──
     toasts: [] as Array<{ id: number, text: string, level: string }>,
     _toastId: 0,

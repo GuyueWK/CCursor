@@ -12,7 +12,7 @@ import {
     type CursorDynamicToolDefinition,
 } from './dynamicTools';
 import { finalizeEditToolCall } from './editRuntime';
-import { finalizeExecTool } from './execRuntime';
+import { finalizeExecTool, ShellSandboxUnsupportedError } from './execRuntime';
 import { fetchMcpState, mergeMcpStateIntoRoutingTable, type McpRoutingEntry, type McpStateServerInfo } from './mcpState';
 import { finalizeInteractionTool } from './interactionRuntime';
 import { execMessage, toolCallCompleted, toolCallStarted } from './stream';
@@ -34,6 +34,15 @@ import { interactionQuery } from './stream';
 import type { ToolResultEnvelope } from './toolResults';
 import type { ParsedRunRequest } from './protocol/types';
 import type { ReadContextState } from './contextCatalog';
+import {
+    applyAutoReviewToArgs,
+    buildAutoReviewBlockResult,
+    classifyRiskyToolCall,
+    isAutoReviewTarget,
+    reviewRiskyToolCall,
+    type AutoReviewDecision,
+    type AutoReviewRuntimeConfig,
+} from './autoReview';
 
 type SubagentModelOverride = ParsedRunRequest['subagentModelOverrides'][number];
 
@@ -83,6 +92,8 @@ export async function* runToolCall(params: {
     cursorDynamicTools?: CursorDynamicToolDefinition[];
     /** Cursor agent projectDir;大 discovery 结果写入其 agent-tools 子目录。 */
     projectDir?: string;
+    /** Cursor Auto-review (run mode) — local allowlist / sandbox / classifier. */
+    autoReview?: AutoReviewRuntimeConfig;
 }): AsyncGenerator<AgentServerMessage, void, void> {
     yield* runToolCallInner(params);
 }
@@ -208,6 +219,37 @@ async function* runToolCallInner(params: Parameters<typeof runToolCall>[0]): Asy
         return;
     }
 
+    let autoReviewDecision: AutoReviewDecision = { kind: 'passthrough' };
+    if (isAutoReviewTarget(cursorToolType) && params.autoReview?.enabled) {
+        autoReviewDecision = yield* reviewRiskyToolCall({
+            config: params.autoReview,
+            session: params.session,
+            cursorToolType,
+            input: sanitizedInput,
+            callId: tc.callId,
+            messages: params.messages,
+            allocateExecMessageId: params.allocateExecMessageId,
+        });
+        if (autoReviewDecision.kind === 'block') {
+            yield toolCallStarted(tc.callId, cursorToolType, startedArgs, modelCallId);
+            const finalized = finalizeToolCall({
+                roundContext: params.roundContext,
+                messages: params.messages,
+                cursorToolType,
+                toolName: tc.name,
+                callId: tc.callId,
+                startedArgs,
+                rawToolResult: buildAutoReviewBlockResult(cursorToolType, autoReviewDecision.reason, sanitizedInput),
+                input: sanitizedInput,
+                modelCallId,
+            });
+            yield finalized.frame;
+            return;
+        }
+        if (autoReviewDecision.kind === 'execute' && cursorToolType !== 'webFetchToolCall')
+            startedArgs = applyAutoReviewToArgs(startedArgs, cursorToolType, autoReviewDecision);
+    }
+
     yield toolCallStarted(tc.callId, cursorToolType, startedArgs, modelCallId);
 
     // communicateUpdateToolCall: 服务端自动完成 (不走 exec)
@@ -312,15 +354,17 @@ async function* runToolCallInner(params: Parameters<typeof runToolCall>[0]): Asy
     }
 
     if (execArgsType && params.session) {
+        const execModelId = cursorToolType === 'taskToolCall' && typeof sanitizedInput.modelId === 'string'
+            ? sanitizedInput.modelId
+            : params.currentModelId;
         let args: Record<string, unknown>;
         try {
-            const execModelId = cursorToolType === 'taskToolCall' && typeof sanitizedInput.modelId === 'string'
-                ? sanitizedInput.modelId
-                : params.currentModelId;
             args = buildExecArgs(executionToolName, sanitizedInput, tc.callId, {
                 conversationId: params.conversationId,
                 currentModelId: execModelId,
             });
+            if (autoReviewDecision.kind === 'execute')
+                args = applyAutoReviewToArgs(args, cursorToolType, autoReviewDecision);
         } catch (e) {
             // server 端 buildExecArgs 失败 → 发送 error result
             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -338,20 +382,77 @@ async function* runToolCallInner(params: Parameters<typeof runToolCall>[0]): Asy
         const execId = `${tc.callId}-exec`;
         const execMessageId = params.allocateExecMessageId();
         yield execMessage(execMessageId, execId, execArgsType, args);
-        yield* finalizeExecTool({
-            session: params.session,
-            toolName: tc.name,
-            callId: tc.callId,
-            cursorToolType,
-            execMessageId,
-            modelCallId,
-            startedArgs,
-            input: sanitizedInput,
-            roundContext: params.roundContext,
-            messages: params.messages,
-            imageCollector: params.imageCollector,
-            readContext: params.readContext,
-        });
+        try {
+            yield* finalizeExecTool({
+                session: params.session,
+                toolName: tc.name,
+                callId: tc.callId,
+                cursorToolType,
+                execMessageId,
+                modelCallId,
+                startedArgs,
+                input: sanitizedInput,
+                roundContext: params.roundContext,
+                messages: params.messages,
+                imageCollector: params.imageCollector,
+                readContext: params.readContext,
+            });
+        }
+        catch (error) {
+            if (!(error instanceof ShellSandboxUnsupportedError) || !params.autoReview?.enabled) {
+                throw error;
+            }
+            logger.info({ tool: tc.name, callId: tc.callId }, '[AUTO-REVIEW] sandbox unsupported — classifying then retrying without sandbox');
+            const classified = yield* classifyRiskyToolCall({
+                config: params.autoReview,
+                cursorToolType,
+                input: sanitizedInput,
+                callId: tc.callId,
+                messages: params.messages,
+            });
+            if (classified.kind === 'block') {
+                const finalized = finalizeToolCall({
+                    roundContext: params.roundContext,
+                    messages: params.messages,
+                    cursorToolType,
+                    toolName: tc.name,
+                    callId: tc.callId,
+                    startedArgs,
+                    rawToolResult: buildAutoReviewBlockResult(cursorToolType, classified.reason, sanitizedInput),
+                    input: sanitizedInput,
+                    modelCallId,
+                });
+                yield finalized.frame;
+                return;
+            }
+            const retryDecision = classified.kind === 'execute'
+                ? classified
+                : { kind: 'execute' as const, skipApproval: false, sandbox: false };
+            const retryArgs = applyAutoReviewToArgs(
+                buildExecArgs(executionToolName, sanitizedInput, tc.callId, {
+                    conversationId: params.conversationId,
+                    currentModelId: execModelId,
+                }),
+                cursorToolType,
+                retryDecision,
+            );
+            const retryExecMessageId = params.allocateExecMessageId();
+            yield execMessage(retryExecMessageId, `${tc.callId}-exec-unsandboxed`, execArgsType, retryArgs);
+            yield* finalizeExecTool({
+                session: params.session,
+                toolName: tc.name,
+                callId: tc.callId,
+                cursorToolType,
+                execMessageId: retryExecMessageId,
+                modelCallId,
+                startedArgs,
+                input: sanitizedInput,
+                roundContext: params.roundContext,
+                messages: params.messages,
+                imageCollector: params.imageCollector,
+                readContext: params.readContext,
+            });
+        }
         return;
     }
 
@@ -580,7 +681,14 @@ async function* runToolCallInner(params: Parameters<typeof runToolCall>[0]): Asy
         let rejectionResult: ToolResultEnvelope | undefined
         if (params.session) {
             const interactionId = params.allocateInteractionId()
-            yield interactionQuery(interactionId, 'webFetchRequestQuery', { args: startedArgs })
+            const fetchQuery: Record<string, unknown> = { args: startedArgs }
+            if (autoReviewDecision.kind === 'execute') {
+                if (autoReviewDecision.skipApproval)
+                    fetchQuery.skipApproval = true
+                if (autoReviewDecision.smartModeApproval)
+                    fetchQuery.smartModeApproval = autoReviewDecision.smartModeApproval
+            }
+            yield interactionQuery(interactionId, 'webFetchRequestQuery', fetchQuery)
             const response = yield* waitForInteractionResponseWithHeartbeat(params.session, interactionId, 'webFetchRequestResponse', null)
             const ir = response ? (response.interactionResponse as Record<string, unknown>) : null
             if (ir) {

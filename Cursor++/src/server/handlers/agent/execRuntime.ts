@@ -17,6 +17,16 @@ import {
     waitForShellExecEventWithHeartbeat,
 } from './wait';
 
+export class ShellSandboxUnsupportedError extends Error {
+    readonly execMessageId: number;
+
+    constructor(execMessageId: number) {
+        super('shell sandbox unsupported');
+        this.name = 'ShellSandboxUnsupportedError';
+        this.execMessageId = execMessageId;
+    }
+}
+
 /**
  * 归一化 ShellBackgroundReason(toJson 后可能是 enum 字符串名或数字)。
  * 0=UNSPECIFIED, 1=TIMEOUT, 2=USER_REQUEST (gen: agent.v1.ShellBackgroundReason)。
@@ -67,6 +77,7 @@ export async function* finalizeExecTool(params: {
         let rejected: { reason?: string } | undefined;
         let permissionDenied: { command?: string; workingDirectory?: string; error?: string } | undefined;
         let backgrounded: { shellId: number; pid?: number; msToWait?: number; reason?: number; terminalsFolder?: string } | undefined;
+        let sandboxUnsupported = false;
         let done = false;
 
         const processShellMessage = function* (shellMsg: Record<string, unknown>): Generator<AgentServerMessage, void, void> {
@@ -95,6 +106,10 @@ export async function* finalizeExecTool(params: {
                 if (ss?.rejected) {
                     const rejectedPayload = ss.rejected as Record<string, unknown>;
                     rejected = { reason: typeof rejectedPayload.reason === 'string' ? rejectedPayload.reason : undefined };
+                    done = true;
+                }
+                if (ss?.sandboxUnsupported) {
+                    sandboxUnsupported = true;
                     done = true;
                 }
                 if (ss?.backgrounded) {
@@ -154,6 +169,12 @@ export async function* finalizeExecTool(params: {
                 break;
             }
             yield* processShellMessage(shellMsg);
+        }
+
+        if (sandboxUnsupported) {
+            logger.info({ tool: params.toolName, callId: params.callId }, '[TOOL] shell sandbox unsupported');
+            yield* waitForExecStreamCloseWithHeartbeat(params.session, params.execMessageId, 5_000);
+            throw new ShellSandboxUnsupportedError(params.execMessageId);
         }
 
         const finalized = finalizeToolCall({

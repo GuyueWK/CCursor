@@ -6,8 +6,23 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Local Auto-review for Cursor Run Mode: allowlist precheck → sandbox when the
+  client supports it → BYOK classifier for remaining Shell / MCP / Fetch calls.
+  Classifier model is selectable in the sidebar (or inherit the current Agent
+  model). Blocked calls return a retry hint so the parent agent can surface the
+  native approval card via `request_smart_mode_approval`.
+
 ### Fixed
 
+- BYOK ON 时 Auto-review 置灰无法选择:客户端门禁是
+  `hasSmartModeClassifierModel()` (AvailableModels 里至少一个
+  `supportsSmartModeClassifier === true`,proto field 45),文档里写成
+  “需要 Claude 4.5 Haiku / GPT-5.4 Mini 其中之一”,但 wire 上只看该布尔值。
+  每个 BYOK 模型都带上该 flag (本地 classifier 就跑在用户的 providers.json
+  模型上),另保留隐藏的上游同名桩做双保险 (supportsAgent=false,
+  不污染 Agent 选择器)。UI 放行后实际跑分仍走本地 classifier (autoReview.ts)。
 - Conversation JSON blobs are stored as UTF-8 `{"role":...}` on the client KV
   (matching official `JSON.parse`). BYOK previously wrote the base64 text of
   that JSON, so toggling BYOK off and continuing the same chat failed with

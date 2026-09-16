@@ -78,6 +78,11 @@ export interface ParsedCustomSubagent {
   raw: Record<string, unknown>
 }
 
+export interface ParsedPermissionsAutoRun {
+  allowInstructions: string[]
+  blockInstructions: string[]
+}
+
 /** 从 runRequest 中提取的关键信息 */
 export interface ParsedRunRequest {
   userText: string
@@ -150,6 +155,12 @@ export interface ParsedRunRequest {
     processWorkingDirectory?: string
     smartModeClassifierAutoModeEnabled?: boolean
     devForceNextSmartModeClassifierBlockToken?: string
+  }
+  /** permissions.json autoRun instructions forwarded by the Cursor client. */
+  permissionsAutoRun: {
+    user: ParsedPermissionsAutoRun
+    project: ParsedPermissionsAutoRun
+    admin: ParsedPermissionsAutoRun
   }
   /** Git 仓库信息 */
   gitRepos?: Array<{ path: string, status: string, branchName: string }>

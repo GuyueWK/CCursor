@@ -1,4 +1,4 @@
-import type { IdeFile, ParsedCursorRule, ParsedRunRequest } from './types'
+import type { IdeFile, ParsedCursorRule, ParsedPermissionsAutoRun, ParsedRunRequest } from './types'
 import { listKnowledgeItems } from '../../../config/knowledgeBaseStore'
 import { logger } from '../../../logger'
 import { emptyParsed, toBytes } from './shared'
@@ -43,6 +43,17 @@ function normalizeBackgroundTaskStatus(value: unknown): string {
   if (text.includes('error')) return 'error'
   if (text.includes('abort')) return 'aborted'
   return text || 'unspecified'
+}
+
+function parsePermissionsAutoRun(raw: unknown): ParsedPermissionsAutoRun {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const allow = Array.isArray(value.allowInstructions)
+    ? value.allowInstructions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+  const block = Array.isArray(value.blockInstructions)
+    ? value.blockInstructions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+  return { allowInstructions: allow, blockInstructions: block }
 }
 
 function parseBackgroundTaskCompletions(action: Record<string, unknown> | undefined): ParsedBackgroundTaskCompletion[] {
@@ -808,6 +819,11 @@ export function parseRunRequest(msg: Record<string, unknown>): ParsedRunRequest 
       processWorkingDirectory: env?.processWorkingDirectory as string | undefined,
       smartModeClassifierAutoModeEnabled: env?.smartModeClassifierAutoModeEnabled as boolean | undefined,
       devForceNextSmartModeClassifierBlockToken: env?.devForceNextSmartModeClassifierBlockToken as string | undefined,
+    },
+    permissionsAutoRun: {
+      user: parsePermissionsAutoRun(requestContext?.userPermissionsAutoRun),
+      project: parsePermissionsAutoRun(requestContext?.projectPermissionsAutoRun),
+      admin: parsePermissionsAutoRun(requestContext?.adminPermissionsAutoRun),
     },
     gitRepos: gitRepos.length > 0 ? gitRepos : undefined,
     isGitRepo: gitRepos.length > 0,

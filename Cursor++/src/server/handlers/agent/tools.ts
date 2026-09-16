@@ -45,6 +45,7 @@ import { logger } from '../../logger';
 import type { EditPlan } from './toolkit/editPlans';
 import { buildRegisteredEditPlan, buildRegisteredExecArgs, findToolByAlias, findToolByCursorType } from './toolRegistry';
 import type { ToolExecBuildOptions } from './toolkit/types';
+import { pickSmartModeFields } from './autoReview';
 
 export interface AvailableMcpTool {
     name: string;
@@ -350,7 +351,10 @@ export function resolveToolCall(
                 '[DYNAMIC-TOOLS] cursor native tool routed');
             return {
                 cursorToolType,
-                sanitizedInput: sanitizeToolInput(toolName, args),
+                sanitizedInput: {
+                    ...sanitizeToolInput(toolName, args),
+                    ...pickSmartModeFields(input),
+                },
                 effectiveToolName: toolName,
             };
         }
@@ -383,6 +387,7 @@ export function resolveToolCall(
                 providerIdentifier: matched?.providerIdentifier ?? server,
                 toolName,
                 serverIdentifier: matched?.serverIdentifier ?? server,
+                ...pickSmartModeFields(input),
             },
         };
     }
@@ -398,6 +403,7 @@ export function resolveToolCall(
                 providerIdentifier: descriptor.providerIdentifier ?? '',
                 toolName: descriptor.toolName ?? '',
                 serverIdentifier: descriptor.serverIdentifier ?? '',
+                ...pickSmartModeFields(input),
             },
         };
     }
@@ -423,6 +429,7 @@ export function resolveToolCall(
                 providerIdentifier: matched?.providerIdentifier ?? flat.server,
                 toolName: matched?.toolName ?? flat.toolName,
                 serverIdentifier: matched?.serverIdentifier ?? flat.server,
+                ...pickSmartModeFields(input),
             },
         };
     }

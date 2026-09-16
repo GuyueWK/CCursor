@@ -27,7 +27,7 @@ import { applyAnthropicCacheBreakpoints, encodeAnthropicRequestMessages, encodeA
 import { logger } from '../../logger';
 import { createProxiedFetch } from './proxyFetch';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders } from './userAgent';
+import { buildDefaultHeaders, partitionCustomHeaders, resolveHeaderTemplates } from './userAgent';
 
 type AnthropicEffort = 'low' | 'medium' | 'high' | 'max';
 
@@ -45,8 +45,11 @@ function mapThinkingLevelToAnthropicEffort(level: NonNullable<LLMStreamRequest['
 export class AnthropicProvider implements LLMProvider {
     readonly name = 'anthropic';
     private client: Anthropic;
+    // Snapshot of the templated subset of entry.headers (copied at construction).
+    private templatedHeaderTemplates?: Record<string, string>;
 
     constructor(entry: ProviderEntry) {
+        const customHeadersCopy = entry.headers ? { ...entry.headers } : undefined;
         const opts: ConstructorParameters<typeof Anthropic>[0] = {};
         if (entry.baseUrl) {
             opts.baseURL = entry.baseUrl;
@@ -60,7 +63,9 @@ export class AnthropicProvider implements LLMProvider {
 
         opts.fetch = createProxiedFetch(entry.proxyUrl);
 
-        const headers = buildDefaultHeaders('anthropic', entry.headers);
+        const { staticHeaders, templatedHeaders } = partitionCustomHeaders(customHeadersCopy);
+        this.templatedHeaderTemplates = templatedHeaders;
+        const headers = buildDefaultHeaders('anthropic', staticHeaders);
         if (headers) {
             opts.defaultHeaders = headers;
         }
@@ -133,9 +138,13 @@ export class AnthropicProvider implements LLMProvider {
         if (request.anthropicBetas)
             betas.push(...request.anthropicBetas.filter(b => !betas.includes(b)));
 
+        const templatedHeaders = resolveHeaderTemplates(this.templatedHeaderTemplates, {
+            conversationId: request.conversationId,
+        });
+        const requestOptions = templatedHeaders ? { headers: templatedHeaders } : undefined;
         const stream = betas.length > 0
-            ? this.client.beta.messages.stream({ ...params, betas } as any)
-            : this.client.messages.stream(params);
+            ? this.client.beta.messages.stream({ ...params, betas } as any, requestOptions)
+            : this.client.messages.stream(params, requestOptions);
         const contentBlocks = new Map<number, { type: string; id?: string; name?: string; signature?: string }>();
 
         for await (const event of stream) {

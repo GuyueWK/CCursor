@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 
 ### Added
 
+- Header value templates in `ProviderEntry.headers`: use `${conversationId}` (resolved per LLM request). Example for OpenCode Go:
+  `{"x-opencode-session": "${conversationId}"}` (plus optional static headers like
+  `"User-Agent": "Cursor++/<version> (ccursor)"`).
+  Templated headers are applied per request; static headers remain on the SDK client.
+  Empty expansions are omitted (no conversation yet → no session header).
+  `x-opencode-session` values are sanitized (≤128 safe chars).
+  Note: `prompt_cache_key` (OpenAI-side prefix cache) and `x-opencode-session`
+  (gateway stickiness) are orthogonal and can be used together.
 - Local Auto-review for Cursor Run Mode: allowlist precheck → sandbox when the
   client supports it → BYOK classifier for remaining Shell / MCP / Fetch calls.
   Classifier model is selectable in the sidebar (or inherit the current Agent

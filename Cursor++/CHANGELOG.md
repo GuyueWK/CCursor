@@ -4,6 +4,19 @@ All notable changes to the Cursor++ BYOK extension are documented here.
 
 Format follows [Keep a Changelog](http://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Header value templates in `ProviderEntry.headers`: use `${conversationId}` (resolved per LLM request). Example for OpenCode Go:
+  `{"x-opencode-session": "${conversationId}"}` (plus optional static headers like
+  `"User-Agent": "Cursor++/<version> (ccursor)"`).
+  Templated headers are applied per request; static headers remain on the SDK client.
+  Empty expansions are omitted (no conversation yet → no session header).
+  `x-opencode-session` values are sanitized (≤128 safe chars).
+  Note: `prompt_cache_key` (OpenAI-side prefix cache) and `x-opencode-session`
+  (gateway stickiness) are orthogonal and can be used together.
+
 ## [0.0.7]
 
 ### Added

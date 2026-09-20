@@ -12,13 +12,17 @@ import type { LLMProvider, LLMStreamRequest, LLMStreamEvent } from './types';
 import { encodeOpenAIRequestMessages, encodeOpenAITools } from './conversationCodec';
 import { createProxiedFetch } from './proxyFetch';
 import { createTransformDiagnostics, hasTransformMutations, transformMessages } from './transformMessages';
-import { buildDefaultHeaders } from './userAgent';
+import { buildDefaultHeaders, partitionCustomHeaders, resolveHeaderTemplates } from './userAgent';
 
 export class OpenAIChatProvider implements LLMProvider {
     readonly name = 'openai-chat';
     private client: OpenAI;
+    // Snapshot of the templated subset of entry.headers (e.g. `"x-opencode-session": "${conversationId}"`).
+    // Copied at construction so later mutations of the config object cannot change in-flight behavior.
+    private templatedHeaderTemplates?: Record<string, string>;
 
     constructor(entry: ProviderEntry) {
+        const customHeadersCopy = entry.headers ? { ...entry.headers } : undefined;
         const opts: ConstructorParameters<typeof OpenAI>[0] = {
             apiKey: entry.auth.value,
         };
@@ -26,7 +30,9 @@ export class OpenAIChatProvider implements LLMProvider {
             opts.baseURL = entry.baseUrl;
         }
         opts.fetch = createProxiedFetch(entry.proxyUrl);
-        const headers = buildDefaultHeaders('openai-chat', entry.headers);
+        const { staticHeaders, templatedHeaders } = partitionCustomHeaders(customHeadersCopy);
+        this.templatedHeaderTemplates = templatedHeaders;
+        const headers = buildDefaultHeaders('openai-chat', staticHeaders);
         if (headers) {
             opts.defaultHeaders = headers;
         }
@@ -62,7 +68,15 @@ export class OpenAIChatProvider implements LLMProvider {
             params.reasoning_effort = request.thinkingLevel;
         }
 
-        const stream = await this.client.chat.completions.create(params);
+        // prompt_cache_key targets OpenAI-side prefix caching; the templated
+        // `x-opencode-session` header below targets gateway stickiness — orthogonal.
+        const templatedHeaders = resolveHeaderTemplates(this.templatedHeaderTemplates, {
+            conversationId: request.conversationId,
+        });
+        const stream = await this.client.chat.completions.create(
+            params,
+            templatedHeaders ? { headers: templatedHeaders } : undefined,
+        );
 
         const toolCalls = new Map<number, { id: string; name: string; args: string }>();
         let usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | null = null;

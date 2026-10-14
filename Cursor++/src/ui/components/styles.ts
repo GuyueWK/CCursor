@@ -92,6 +92,8 @@ export const styles = /* css */ `
   .byok-banner button.on { background: var(--vscode-statusBarItem-prominentBackground, #3794ff); color: var(--vscode-statusBarItem-prominentForeground, #fff); }
   .byok-banner button.off { background: var(--vscode-statusBarItem-warningBackground, #cc6633); color: var(--vscode-statusBarItem-warningForeground, #fff); }
   .server-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .auto-review-field { margin: 8px 0 4px; }
+  .auto-review-hint { font-size: 10px; opacity: 0.6; margin-top: 3px; line-height: 1.35; }
 
   .acc { border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); border-radius: 3px; margin-bottom: 6px; background: var(--vscode-editor-background); }
   .acc.dirty { border-color: var(--vscode-inputValidation-warningBorder, #cca700); }

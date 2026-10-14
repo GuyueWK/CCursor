@@ -1274,6 +1274,15 @@ export async function* handleConversationRun(
           supportsMcpAuth: parsed.supportsMcpAuth,
           cursorDynamicTools: parsed.cursorDynamicTools,
           projectDir: parsed.env.projectFolder ?? parsed.env.workspacePaths?.[0],
+          autoReview: {
+            enabled: parsed.env.smartModeClassifierAutoModeEnabled === true,
+            forceBlockToken: parsed.env.devForceNextSmartModeClassifierBlockToken,
+            currentModelId: parsed.modelId,
+            conversationId: parsed.conversationId,
+            sandboxEnabled: parsed.env.sandboxEnabled === true,
+            sandboxSupported: parsed.env.sandboxSupported === true,
+            permissions: parsed.permissionsAutoRun,
+          },
         })
         for await (const frame of toolFrames) {
           const completedToolCall = extractCompletedToolCall(frame)

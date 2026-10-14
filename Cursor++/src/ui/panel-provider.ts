@@ -171,6 +171,25 @@ export class PanelProvider implements vscode.WebviewViewProvider {
           }
           break
         }
+        case 'saveAutoReviewModel': {
+          try {
+            const modelId = typeof msg.modelId === 'string' ? msg.modelId.trim() : ''
+            await updateProviders((draft) => {
+              if (modelId)
+                draft.autoReviewModelId = modelId
+              else
+                delete draft.autoReviewModelId
+            })
+            await refreshState()
+            this.postState()
+            this.view?.webview.postMessage({ type: 'toast', text: 'Auto-review model saved.', level: 'info' })
+          }
+          catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err)
+            this.view?.webview.postMessage({ type: 'toast', text: `Save Auto-review model failed: ${errMsg}`, level: 'error', duration: 6000 })
+          }
+          break
+        }
         case 'saveProviders': {
           const next = msg.providers as ProviderEntry[]
           const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined

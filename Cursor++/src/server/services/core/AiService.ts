@@ -38,23 +38,86 @@ import {
   removeKnowledgeItem,
   updateKnowledgeItem,
 } from '../../config/knowledgeBaseStore'
-import { buildByokAvailableModels } from '../../handlers/models/byokModelBuilder'
+import {
+  buildByokAvailableModels,
+  buildClassifierFallbackStubModels,
+  isClassifierModelName,
+  toHiddenClassifierStubModel,
+} from '../../handlers/models/byokModelBuilder'
+import { fetchUpstreamAvailableModels } from '../../handlers/models/upstream'
 import { flattenModels } from '../../config/providersStore'
 import { logger } from '../../logger'
 
 /**
  * BYOK ON 模式下,客户端能命中我们这里就说明白名单生效中。
- * 直接返回 providers.json 整合后的本地 BYOK 模型列表,不再合并上游。
+ * 返回 providers.json 本地模型 (全部带 supportsSmartModeClassifier=true)
+ * + 隐藏的 Auto-review classifier 桩。
+ *
+ * 为什么需要 classifier 桩:
+ *   客户端的门禁是 modelConfigService.hasSmartModeClassifierModel():
+ *   AvailableModels 里至少有一个 supportsSmartModeClassifier === true
+ *   (proto field 45)。文档里写成“需要 Claude 4.5 Haiku / GPT-5.4 Mini
+ *   其中之一”,但 wire 上只看这个布尔值。BYOK 之前一个都不带,客户端直接在
+ *   Settings > Agents > Approvals & Execution 把 Auto-review 置灰,导致
+ *   BYOK OFF 能选、BYOK ON 选不上的现象。CCursor 的本地 classifier
+ *   (autoReview.ts) 并不需要托管模型跑分,只是 UI 门禁过不去。
+ *   主修复在 byokModelBuilder: 每个 BYOK 模型都带上该 flag (本地 classifier
+ *   就跑在用户的 providers.json 模型上,语义成立)。这里额外把上游同名模型
+ *   转成隐藏桩 (supportsAgent=false, 不污染 Agent 选择器) 并入列表,双保险;
+ *   Agent 实际跑分仍走本地 providers.json 模型。
  *
  * BYOK OFF 模式下,白名单不含 AvailableModels,这个 handler 根本不会被调用 ——
  * 客户端直接拿到官方真实订阅列表。
  */
-async function handleAvailableModels() {
+async function handleAvailableModels(request: Record<string, unknown>, context: { requestHeader?: Headers } | undefined) {
   const byok = buildByokAvailableModels()
-  logger.info({ count: byok.length }, '[MODEL] availableModels (BYOK only)')
+  const byokNameSet = new Set(byok.map((model) => model.name))
+  let classifierStubs: ReturnType<typeof buildByokAvailableModels> = []
+  try {
+    const clientHeaders = context?.requestHeader ?? new Headers()
+    const upstream = await fetchUpstreamAvailableModels(
+      clientHeaders,
+      (request ?? {}) as Parameters<typeof fetchUpstreamAvailableModels>[1],
+    )
+    const upstreamModels = upstream?.models ?? []
+    const seenUpstreamNames = new Set<string>()
+    for (const upstreamModel of upstreamModels) {
+      const modelName = typeof upstreamModel?.name === 'string' ? upstreamModel.name : ''
+      if (!modelName || byokNameSet.has(modelName) || seenUpstreamNames.has(modelName))
+        continue
+      if (!isClassifierModelName(modelName))
+        continue
+      seenUpstreamNames.add(modelName)
+      classifierStubs.push(toHiddenClassifierStubModel(upstreamModel))
+    }
+    logger.info(
+      {
+        byokCount: byok.length,
+        byokClassifierCount: byok.filter(model => model.supportsSmartModeClassifier === true).length,
+        upstreamCount: upstreamModels.length,
+        classifierCount: classifierStubs.length,
+      },
+      '[MODEL] availableModels (BYOK + classifier stubs from upstream)',
+    )
+  }
+  catch (error) {
+    logger.warn({ error: (error as Error).message }, '[MODEL] upstream classifier lookup failed, using fallbacks')
+  }
+  if (classifierStubs.length === 0) {
+    classifierStubs = buildClassifierFallbackStubModels().filter((stub) => !byokNameSet.has(stub.name))
+    logger.info(
+      {
+        byokCount: byok.length,
+        byokClassifierCount: byok.filter(model => model.supportsSmartModeClassifier === true).length,
+        classifierCount: classifierStubs.length,
+      },
+      '[MODEL] availableModels (BYOK + classifier fallback stubs)',
+    )
+  }
+  const merged = [...byok, ...classifierStubs]
   return create(AvailableModelsResponseSchema, {
-    models: byok,
-    modelNames: byok.map(m => m.name),
+    models: merged,
+    modelNames: merged.map(m => m.name),
     // feature config 给空 stub,Cursor 客户端遇到空 config 会用内置默认行为
     composerModelConfig: create(AvailableModelsResponse_FeatureModelConfigSchema, {}),
     cmdKModelConfig: create(AvailableModelsResponse_FeatureModelConfigSchema, {}),
@@ -85,7 +148,11 @@ export default (router: ConnectRouter) => {
       transmitTimestamp: Date.now(),
     }),
 
-    availableModels: handleAvailableModels,
+    availableModels: async (request, context) =>
+      handleAvailableModels(
+        (request ?? {}) as Record<string, unknown>,
+        context as { requestHeader?: Headers } | undefined,
+      ),
 
     // GetDefaultModel — 从 providers.json 推送 BYOK 默认模型到 Composer + Cmd+K
     // 客户端逻辑: nextDefaultSetDate > lastDefaultModelSetDate → setDefaultModel(model)

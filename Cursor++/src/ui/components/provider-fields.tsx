@@ -124,6 +124,12 @@ export function ProviderFields() {
         </textarea>
         <div class="err" {...{ 'x-show': '$store.app.headersInvalid[p.id]' }}>Invalid JSON</div>
       </div>
+      <div style="opacity:.6;font-size:10px;line-height:1.4;margin:2px 0 4px">
+        OpenCode Go providers (baseUrl contains opencode.ai/zen/go) show live quota in the chat usage slot automatically when their model is selected, using the same API key as inference. Quota refreshes after each completed conversation. Other providers keep BYOK — unlimited.
+      </div>
+      <div style="opacity:.6;font-size:10px;line-height:1.4;margin:2px 0 4px" x-show="$store.app.isXaiLike($store.app.getDraft(p.id))">
+        xAI provider: log in via the SuperGrok section above to use your subscription (no API key needed); a static pay-as-you-go key works too and is used as fallback.
+      </div>
     </>
   )
 }

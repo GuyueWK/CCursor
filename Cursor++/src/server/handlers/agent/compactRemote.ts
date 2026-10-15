@@ -14,6 +14,7 @@ import type { ProviderEntry } from '../../data/defaults'
 import type { LLMMessage } from '../llm/types'
 import { encodeResponsesInput } from '../llm/conversationCodec'
 import { createProxiedFetch } from '../llm/proxyFetch'
+import { getEffectiveXaiApiKey } from '../../services/account/xaiOAuth'
 import { logger } from '../../logger'
 
 export interface RemoteCompactResult {
@@ -28,7 +29,10 @@ export async function tryRemoteCompact(params: {
 }): Promise<RemoteCompactResult | null> {
     try {
         const opts: ConstructorParameters<typeof OpenAI>[0] = {
-            apiKey: params.provider.auth.value,
+            // xAI providers carry the fresh SuperGrok OAuth token when a
+            // session exists; every other provider is untouched (helper
+            // returns the static auth.value for non-xAI entries).
+            apiKey: getEffectiveXaiApiKey(params.provider),
         }
         if (params.provider.baseUrl) {
             opts.baseURL = params.provider.baseUrl

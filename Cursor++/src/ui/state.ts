@@ -5,15 +5,17 @@
  * 状态变化时通过 EventEmitter 通知所有消费方。
  */
 import type { ByokMode, ProviderEntry } from '../server/data/defaults'
+import type { XaiLoginStatus } from '../server/services/account/xaiOAuth'
 import * as net from 'node:net'
 import * as vscode from 'vscode'
 import { version as EXTENSION_VERSION } from '../../package.json'
 import { isServerRunning } from '../server'
 import { getServerConfig } from '../server/config'
 import { loadProviders } from '../server/config/providersStore'
-import { getByokMode } from '../server/config/routesStore'
 
+import { getByokMode } from '../server/config/routesStore'
 import { getWebTools } from '../server/config/searchConfigStore'
+import { getXaiLoginStatus } from '../server/services/account/xaiOAuth'
 
 export type ServerState = 'local' | 'remote' | 'offline'
 
@@ -29,6 +31,8 @@ export interface AppState {
   providers: ProviderEntry[]
   webTools: import('../server/data/defaults').WebToolsConfig
   autoReviewModelId?: string
+  /** SuperGrok OAuth session summary (logged out when no session file). */
+  xai: XaiLoginStatus
   version: string
   fileLogEnabled: boolean
   logFilePath: string
@@ -48,6 +52,7 @@ let current: AppState = {
   providers: [],
   webTools: { $schemaVersion: 1, search: { providers: [], parallel: false, maxResults: 5 }, fetch: { provider: 'builtin' } },
   autoReviewModelId: undefined,
+  xai: { loggedIn: false },
   fileLogEnabled: false,
   logFilePath: '',
 }
@@ -146,6 +151,7 @@ export async function refreshState(_secrets?: vscode.SecretStorage): Promise<App
     providers,
     webTools: getWebTools(),
     autoReviewModelId: loadProviders().autoReviewModelId,
+    xai: getXaiLoginStatus(),
     version: EXTENSION_VERSION,
     fileLogEnabled: current.fileLogEnabled,
     logFilePath: current.logFilePath,

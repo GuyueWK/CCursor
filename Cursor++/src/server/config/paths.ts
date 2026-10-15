@@ -5,7 +5,7 @@
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { CCURSOR_DIR_NAME, DB_FILE_NAME, KNOWLEDGE_BASE_FILE_NAME, MANAGED_SKILLS_FILE_NAME, MODELS_CATALOG_FILE_NAME, PROVIDERS_FILE_NAME, ROUTES_FILE_NAME, WEB_TOOLS_FILE_NAME } from '../data/defaults'
+import { CCURSOR_DIR_NAME, DB_FILE_NAME, KNOWLEDGE_BASE_FILE_NAME, MANAGED_SKILLS_FILE_NAME, MODELS_CATALOG_FILE_NAME, PROVIDERS_FILE_NAME, ROUTES_FILE_NAME, WEB_TOOLS_FILE_NAME, XAI_CREDENTIALS_FILE_NAME } from '../data/defaults'
 
 export function getCcursorDir(): string {
   return join(homedir(), CCURSOR_DIR_NAME)
@@ -17,6 +17,16 @@ export function getRoutesFilePath(): string {
 
 export function getProvidersFilePath(): string {
   return join(getCcursorDir(), PROVIDERS_FILE_NAME)
+}
+
+/**
+ * SuperGrok OAuth credential 路径 (~/.ccursor/xai-credentials.json)。
+ *
+ * 存 device-code 流程换回的 { access, refresh, expiresAt }。
+ * 安全等级与 providers.json 明文存 key 一致, 不额外设文件权限。
+ */
+export function getXaiCredentialsFilePath(): string {
+  return join(getCcursorDir(), XAI_CREDENTIALS_FILE_NAME)
 }
 
 export function getDatabaseFilePath(): string {

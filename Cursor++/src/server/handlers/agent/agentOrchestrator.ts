@@ -8,6 +8,7 @@ import { warmupBlobsAsync } from './blobStore';
 import { logger } from '../../logger';
 import { isAgentRunAbortedError } from './wait';
 import { recordGoUsageModelSeen, refreshGoUsageAfterConversation } from '../../services/account/opencodeGoUsage';
+import { ensureXaiAuthForModel } from '../llm/providerRuntime';
 import {
     applyMcpsPart,
     applyRulesPart,
@@ -28,6 +29,10 @@ export async function* handleRunRequest(
     // GetCurrentPeriodUsage shows Zen quota only when the selected model
     // belongs to an opencode Go provider.
     recordGoUsageModelSeen(parsed.modelId);
+    // SuperGrok: refresh the xAI OAuth access token once when it is
+    // missing/expiring so this turn runs on a fresh Bearer. Never throws
+    // (degrades to the static API key); non-xAI models return immediately.
+    await ensureXaiAuthForModel(parsed.modelId);
     // kvGetBlob 请求 id — 与 conversationRuntime 的 blobCounter 相互独立。
     // 用高位起始值避开后者(从 0 递增)的取值区间,防止 id 撞号。
     let nextBlobRequestId = 900_000;

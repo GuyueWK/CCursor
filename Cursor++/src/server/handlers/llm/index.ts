@@ -4,4 +4,4 @@
 export type { LLMProvider, LLMStreamRequest, LLMStreamEvent, LLMMessage, LLMTool, LLMContentBlock, LLMUsage } from './types';
 export type { ProviderRuntime, PreparedProviderConversation } from './providerRuntime';
 export { routeModel } from './router';
-export { resolveProviderRuntime } from './providerRuntime';
+export { ensureXaiAuthForModel, resolveProviderRuntime } from './providerRuntime';

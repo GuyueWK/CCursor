@@ -81,6 +81,69 @@ export function initApp(Alpine: AlpineType) {
     saveSnapshots: {} as Record<string, { targetIds: string[], snapshots: Record<string, any> }>,
     savingProviders: {} as Record<string, boolean>,
 
+    // ── SuperGrok OAuth ──
+    xaiChallenge: null as { url: string, userCode: string, expiresAtMs: number } | null,
+    xaiWorking: false,
+
+    /** 面板用量位文案: "expires in 42m" / "expired — will refresh on next turn" */
+    xaiExpiryLabel(): string {
+      const seconds = this.state?.xai?.expiresInSec
+      if (seconds === undefined || seconds === null)
+        return ''
+      if (seconds <= 0)
+        return '(expired — refreshes on next turn)'
+      if (seconds < 3600)
+        return `(expires in ${Math.max(1, Math.round(seconds / 60))}m)`
+      return `(expires in ${(seconds / 3600).toFixed(1)}h)`
+    },
+
+    startXaiLogin() {
+      if (this.xaiWorking)
+        return
+      this.xaiWorking = true
+      this.post('xaiDeviceStart')
+    },
+
+    confirmXaiLogin() {
+      if (this.xaiWorking || !this.xaiChallenge)
+        return
+      this.xaiWorking = true
+      this.post('xaiDevicePoll')
+    },
+
+    cancelXaiLogin() {
+      this.xaiChallenge = null
+      this.xaiWorking = false
+      this.post('xaiDeviceCancel')
+    },
+
+    logoutXai() {
+      this.xaiChallenge = null
+      this.xaiWorking = false
+      this.post('xaiLogout')
+    },
+
+    copyXaiCode() {
+      const code = this.xaiChallenge?.userCode || ''
+      if (!code)
+        return
+      try {
+        const done = (navigator as any)?.clipboard?.writeText?.(code)
+        if (done && typeof done.then === 'function') {
+          done.then(
+            () => this.toast('User code copied.', 'info'),
+            () => this.toast(`User code: ${code}`, 'info', 8000),
+          )
+        }
+        else {
+          this.toast(`User code: ${code}`, 'info', 8000)
+        }
+      }
+      catch {
+        this.toast(`User code: ${code}`, 'info', 8000)
+      }
+    },
+
     // ── Web Tools Config ──
     webToolsOpen: false,
     webToolsTab: 'search' as 'search' | 'fetch',
@@ -272,7 +335,10 @@ export function initApp(Alpine: AlpineType) {
         }
       }
       if (!p.auth?.value?.trim())
+        // xAI provider 已登录 SuperGrok 时允许静态 key 为空 (走 OAuth token)。
         errors.authValue = 'Auth value is required'
+      if (errors.authValue && this.isXaiLike(p) && this.state?.xai?.loggedIn)
+        delete errors.authValue
       // Anthropic 允许 apiKey / token 两种; 其他 provider 只允许 apiKey
       if (p.type === 'anthropic') {
         if (!['apiKey', 'token'].includes(p.auth?.kind))
@@ -421,6 +487,15 @@ export function initApp(Alpine: AlpineType) {
       if (d.type !== 'anthropic') {
         d.auth = { ...(d.auth || { value: '' }), kind: 'apiKey' }
       }
+    },
+
+    /** 面板侧的 xAI provider 判定 (与服务端 isXaiProvider 同口径, 供校验豁免用)。 */
+    isXaiLike(p: any): boolean {
+      const base = String(p?.baseUrl || '').toLowerCase()
+      if (base.includes('api.x.ai'))
+        return true
+      const label = String(p?.name || p?.id || '')
+      return /super[\s_-]*grok/i.test(label) || /\bxai\b/i.test(label)
     },
 
     updateModelField(pid: string, mid: string, field: string, value: any) {
@@ -800,7 +875,9 @@ export function initApp(Alpine: AlpineType) {
         this.toast('Please set Base URL first', 'warn')
         return
       }
-      if (!draft.auth?.value?.trim()) {
+      // xAI provider 已登录 SuperGrok 时静态 key 可空 (服务端用 OAuth token 拉列表)。
+      const canUseXaiOAuth = this.isXaiLike(draft) && this.state?.xai?.loggedIn
+      if (!draft.auth?.value?.trim() && !canUseXaiOAuth) {
         this.toast('Please set Auth value first', 'warn')
         return
       }
@@ -918,6 +995,24 @@ export function initApp(Alpine: AlpineType) {
         return
       s.ac.results = msg.results || []
       s.ac.selected = 0
+    }
+    else if (msg?.type === 'xaiDeviceChallenge') {
+      s.xaiChallenge = {
+        url: typeof msg.url === 'string' ? msg.url : '',
+        userCode: typeof msg.userCode === 'string' ? msg.userCode : '',
+        expiresAtMs: typeof msg.expiresAtMs === 'number' ? msg.expiresAtMs : 0,
+      }
+      s.xaiWorking = false
+    }
+    else if (msg?.type === 'xaiDeviceResult') {
+      s.xaiWorking = false
+      if (msg.ok) {
+        s.xaiChallenge = null
+      }
+      else {
+        // 保留挑战态让用户重试确认 (code 过期/拒绝时重新走 start 拿新码)。
+        s.toast(`SuperGrok login failed: ${msg.error || 'unknown error'}`, 'error', 8000)
+      }
     }
     else if (msg?.type === 'toast') {
       s.toast(msg.text, msg.level || 'info', msg.duration ?? 4000)

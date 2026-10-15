@@ -5,6 +5,8 @@ import { OpenAIChatProvider } from './openai-chat';
 import { OpenAIResponsesProvider } from './openai-responses';
 import { GeminiProvider } from './gemini';
 import { resolveModel } from '../models/mapper';
+import { logger } from '../../logger';
+import { ensureFreshXaiAccessToken, getEffectiveXaiApiKey, isXaiOAuthCompatibleType, isXaiProvider } from '../../services/account/xaiOAuth';
 import { makeByokConnectError } from '../errors';
 import { ErrorDetails_Error } from '../../gen/aiserver_v1_shared_pb';
 import type { ProviderStateStrategy } from './stateStrategy';
@@ -84,7 +86,30 @@ function instantiateProvider(entry: ProviderEntry): LLMProvider {
     }
 }
 
+/**
+ * Build an xAI provider client carrying the current SuperGrok OAuth token.
+ *
+ * xAI clients are intentionally NOT cached in providerInstances: the OAuth
+ * access token rotates hourly, and a cached client would keep sending the
+ * stale Bearer until something calls resetProviderInstanceCache(). Client
+ * construction is cheap (no network), so per-turn instantiation is fine.
+ * Non-OpenAI-compatible xAI entries fall through to the cached path so a
+ * misconfigured type never silently changes behaviour.
+ */
+function instantiateXaiProvider(entry: ProviderEntry): LLMProvider | null {
+  if (!isXaiProvider(entry) || !isXaiOAuthCompatibleType(entry.type))
+    return null
+  const effectiveEntry: ProviderEntry = {
+    ...entry,
+    auth: { ...entry.auth, value: getEffectiveXaiApiKey(entry) },
+  }
+  return instantiateProvider(effectiveEntry)
+}
+
 function getProviderForEntry(entry: ProviderEntry): LLMProvider {
+    const xaiProvider = instantiateXaiProvider(entry);
+    if (xaiProvider)
+        return xaiProvider;
     let inst = providerInstances.get(entry.id);
     if (!inst) {
         inst = instantiateProvider(entry);
@@ -95,6 +120,25 @@ function getProviderForEntry(entry: ProviderEntry): LLMProvider {
 
 export function resetProviderInstanceCache(): void {
     providerInstances.clear();
+}
+
+/**
+ * Pre-turn SuperGrok ensure for a model id. Refreshes the OAuth access
+ * token once when it is missing/expiring so the turn below runs on a
+ * fresh Bearer. Never throws: auth failure degrades to the static API
+ * key path instead of blocking the chat turn.
+ */
+export async function ensureXaiAuthForModel(modelId: string): Promise<void> {
+  try {
+    const resolved = resolveModel(modelId)
+    const providerEntry = resolved.providerEntry
+    if (!providerEntry || !isXaiProvider(providerEntry) || !isXaiOAuthCompatibleType(providerEntry.type))
+      return
+    await ensureFreshXaiAccessToken()
+  }
+  catch (error) {
+    logger.warn({ error: (error as Error).message, modelId }, '[XAI_AUTH] pre-turn ensure failed, continuing with static key')
+  }
 }
 
 function getStateStrategy(name: ProviderType): ProviderStateStrategy {

@@ -5,7 +5,7 @@ import {
   normalizeStoredMessage,
   restoreStoredMessage,
   storedMessageToLLMMessage,
-
+  toOfficialCoreMessage,
 } from '../llm/storedTranscript'
 
 export interface BlobMessage {
@@ -30,6 +30,8 @@ export function restoreBlobMessageToLLMMessage(message: Record<string, unknown>)
 export function llmMessageToBlobMessage(message: LLMMessage): StoredMessage {
   return llmMessageToStoredMessage(message)
 }
+
+export { toOfficialCoreMessage }
 
 export function summarizeAssistantContent(content: string | LLMContentBlock[] | undefined): { thinking?: string, text?: string } {
   if (!Array.isArray(content)) {

@@ -1,6 +1,7 @@
 import type { AgentServerMessage } from '../../gen/agent_v1_pb'
 import type { LLMContentBlock, LLMMessage } from '../llm/types'
 import { logger } from '../../logger'
+import { restoreStoredMessage, toOfficialCoreMessage } from '../llm/storedTranscript'
 import { cachedBlobPayloadBytes, decodeBlob, encodeBlob, isJsonBlobPayload } from './blob'
 import { cacheBlob, getCachedBlob } from './blobStore'
 import { normalizeBlobMessage, restoreBlobMessageToLLMMessage } from './transcript'
@@ -25,9 +26,11 @@ export function resetJsonBlobRewriteForTests(): void {
 }
 
 /**
- * 把 cache 里的 JSON 历史 blob 按官方 UTF-8 JSON 再写一遍客户端。
- * 旧 BYOK 会话存的是 base64 文本,切回官方会 JSON.parse 失败;同一 conversation
- * 在本进程里只修一次,避免每轮重传整段历史。
+ * 把 cache 里的 JSON 历史 blob 按官方 UTF-8 CoreMessage 再写一遍客户端。
+ * 旧 BYOK 会话可能是 base64 文本,或 `{role:tool, content:string}` —
+ * 官方 `toRedactedToolMessage` 会对 content 无条件 `.map`。
+ * 同一 conversation 在本进程里只修一次,避免每轮重传整段历史。
+ * blobId 保持不变 (历史索引仍指向旧 id)。
  */
 export function* rewriteCachedJsonBlobsForOfficialClient(
   buildKvMessage: BuildKvMessage,
@@ -47,12 +50,31 @@ export function* rewriteCachedJsonBlobsForOfficialClient(
     const raw = cachedBlobPayloadBytes(blobData)
     if (!isJsonBlobPayload(raw))
       continue
-    yield buildKvMessage(++counter, blobId, blobData, raw)
+
+    let payloadBytes = raw
+    let payloadData = blobData
+    try {
+      const parsed = decodeBlob(blobData)
+      if (isRecord(parsed) && typeof parsed.role === 'string') {
+        const stored = restoreStoredMessage(parsed)
+        if (stored) {
+          payloadBytes = Buffer.from(JSON.stringify(toOfficialCoreMessage(stored)), 'utf-8')
+          payloadData = Buffer.from(payloadBytes).toString('base64')
+          if (payloadData !== blobData)
+            cacheBlob(blobId, payloadData)
+        }
+      }
+    }
+    catch (error) {
+      logger.warn({ blobId, error: (error as Error).message }, '[SESSION] skipped official JSON blob rewrite')
+    }
+
+    yield buildKvMessage(++counter, blobId, payloadData, payloadBytes)
     rewritten++
   }
   rewrittenJsonBlobConversations.add(conversationId)
   if (rewritten > 0) {
-    logger.info({ conversationId, rewritten, total: blobIds.length }, '[SESSION] rewrote JSON history blobs as utf-8 for official client')
+    logger.info({ conversationId, rewritten, total: blobIds.length }, '[SESSION] rewrote JSON history blobs as official CoreMessage')
   }
   return counter
 }

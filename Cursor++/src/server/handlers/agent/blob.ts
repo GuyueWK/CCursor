@@ -11,9 +11,11 @@
  *   - protobuf: raw bytes —— 官方 fromBinary
  *
  * 旧实现把 JSON 的 base64 文本再 UTF-8 编码后写入客户端,官方切回时
- * JSON.parse("eyJyb2xlI...") 失败。encodeBlob 现在同时返回 json utf-8 raw。
+ * JSON.parse("eyJyb2xlI...") 失败。encodeBlob 现在同时返回 json utf-8 raw,
+ * 并把 role 消息转成官方 CoreMessage 形状 (tool 必须是 tool-result[])。
  */
 import { createHash } from 'crypto'
+import { normalizeStoredMessage, toOfficialCoreMessage } from '../llm/storedTranscript'
 
 function finalizeBlobData(blobData: string): { blobId: string, blobData: string } {
   const blobId = createHash('sha256').update(blobData).digest('base64')
@@ -32,9 +34,31 @@ function tryParseJson(text: string): unknown {
   }
 }
 
+function isProviderOptions(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Role-bearing JSON → official CoreMessage. Other payloads pass through. */
+function toOfficialBlobPayload(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data))
+    return data
+  const rec = data as Record<string, unknown>
+  if (typeof rec.role !== 'string')
+    return data
+  return toOfficialCoreMessage(normalizeStoredMessage({
+    role: rec.role,
+    content: rec.content,
+    toolCallId: typeof rec.toolCallId === 'string' ? rec.toolCallId : undefined,
+    toolName: typeof rec.toolName === 'string' ? rec.toolName : undefined,
+    isError: typeof rec.isError === 'boolean' ? rec.isError : undefined,
+    id: typeof rec.id === 'string' ? rec.id : undefined,
+    providerOptions: isProviderOptions(rec.providerOptions) ? rec.providerOptions : undefined,
+  }))
+}
+
 /** 将 JSON 对象编码为 blob (cache=base64, wire=utf-8 JSON) 并计算 blobId (sha256) */
 export function encodeBlob(data: unknown): { blobId: string, blobData: string, blobDataRaw: Uint8Array } {
-  const jsonBytes = Buffer.from(JSON.stringify(data), 'utf-8')
+  const jsonBytes = Buffer.from(JSON.stringify(toOfficialBlobPayload(data)), 'utf-8')
   const { blobId, blobData } = finalizeBlobData(jsonBytes.toString('base64'))
   return { blobId, blobData, blobDataRaw: jsonBytes }
 }

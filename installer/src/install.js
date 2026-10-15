@@ -10,7 +10,8 @@
  *   5. 注入 cursor-agent-host 独立 HTTP/1.1 transport 拦截并禁用 WebSocket
  *   6. Cursor 3.9+ always-local singleton BYOK router + HTTP/1.1 proxy 修补
  *   7. KaTeX CSS link 修补 (workbench.html)
- *   8. 提示重启
+ *   8. Cursor 3.23+ 强制关闭 cursor_agent_host 门闩 (退回 legacy Agent 拓扑)
+ *   9. 提示重启
  */
 import { existsSync, readFileSync } from 'fs';
 import { findCursorPathsDetailed, formatDiagnostic } from './detect.js';
@@ -21,6 +22,7 @@ import { inspectAlwaysLocalPatch, patchAlwaysLocal } from './patch-always-local.
 import { getAgentHostBackupTargets, isAgentHostPatched, patchAgentHost } from './patch-agent-host.js';
 import { patchKatex } from './patch-katex.js';
 import { patchProxy39, needsProxy39Patch, isProxy39Patched } from './patch-proxy-39.js';
+import { patchAgentHostGate, isAgentHostGateFullyPatched } from './patch-agent-host-gate.js';
 // delete-fix 已移除 — 3.2.11 原生 tombstoneDeletedComposer 已覆盖
 import { releaseDefaults } from './release-defaults.js';
 
@@ -52,11 +54,12 @@ export async function install() {
   const alPatched = inspectAlwaysLocalPatch(paths).fullyPatched;
   const agentHostPatched = isAgentHostPatched(paths);
   const proxy39Ok = !needsProxy39Patch(paths) || isProxy39Patched(paths);
+  const agentGateOk = isAgentHostGateFullyPatched(paths);
   const agentHostBackups = getAgentHostBackupTargets(paths).some(file => hasBackup(file, 'agent-host'));
   const hasBackups = hasBackup(paths.workbenchJs) || hasBackup(paths.glassJs) || hasBackup(paths.alwaysLocalMain)
     || hasBackup(paths.alwaysLocalSingletonJs) || hasBackup(paths.extensionHostJs) || agentHostBackups;
 
-  if (extInstalled && hookInjected && alPatched && agentHostPatched && proxy39Ok) {
+  if (extInstalled && hookInjected && alPatched && agentHostPatched && proxy39Ok && agentGateOk) {
     ok('Already fully installed');
     info('To reinstall, run "ccursor uninstall" first');
     return;
@@ -90,6 +93,9 @@ export async function install() {
 
   // 7. KaTeX CSS link (workbench.html + checksum)
   patchKatex(paths, info);
+
+  // 8. Cursor 3.23+ Agent Host 门闩强制关闭 (恢复 legacy 拓扑, 修复 remote 工作区 BYOK)
+  patchAgentHostGate(paths, info);
 
   console.log('');
   ok('Installation complete!');

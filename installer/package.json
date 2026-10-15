@@ -9,7 +9,8 @@
   "scripts": {
     "build": "node esbuild.js",
     "build:vsix": "node src/build-vsix.js",
-    "build:all": "npm run build:vsix && npm run build"
+    "build:all": "npm run build:vsix && npm run build",
+    "test": "node --test test/*.test.mjs"
   },
   "files": [
     "dist/",

@@ -24,6 +24,9 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 
 ### Fixed
 
+- GetDefaultModel 与模型选择器对 `defaultOn` 的口径不一致:缺省字段在选择器里是关闭,却会被推成 Composer / Cmd+K 的默认模型。现在只有显式 `defaultOn: true` 才启用。
+- Canvas 单文件导出把 `data.json` 内联进 `<script>` 前转义 `<`,避免内容里的 `</script>` 截断 HTML。
+- Cursor 3.23+ 安装时强制关闭 `cursor_agent_host` 门闩,Remote-SSH 上的 BYOK 模型不再被官方端拒绝为无效模型名。更新 Cursor 后需要重新安装。
 - BYOK ON 时 Auto-review 置灰无法选择:客户端门禁是
   `hasSmartModeClassifierModel()` (AvailableModels 里至少一个
   `supportsSmartModeClassifier === true`,proto field 45),文档里写成
@@ -31,11 +34,15 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
   每个 BYOK 模型都带上该 flag (本地 classifier 就跑在用户的 providers.json
   模型上),另保留隐藏的上游同名桩做双保险 (supportsAgent=false,
   不污染 Agent 选择器)。UI 放行后实际跑分仍走本地 classifier (autoReview.ts)。
-- Conversation JSON blobs are stored as UTF-8 `{"role":...}` on the client KV
-  (matching official `JSON.parse`). BYOK previously wrote the base64 text of
-  that JSON, so toggling BYOK off and continuing the same chat failed with
-  `Unexpected token 'e', "eyJyb2xlIj"... is not valid JSON`. Existing chats are
-  rewritten on the next BYOK turn.
+- Conversation JSON blobs are stored as UTF-8 official AI SDK CoreMessage on the
+  client KV (`JSON.parse` + `toRedactedCoreMessage`). BYOK previously wrote
+  base64 text (`Unexpected token 'e', "eyJyb2xlIj"...`) and `{role:tool,
+  content:string}` (official `toRedactedToolMessage` always does `content.map`).
+  Wire shape now matches Cursor 3.20 `conversationHistoryToCoreMessages`:
+  system string, user `[{type:text|image}]` (`image` is a data URL), assistant
+  string or `text`/`reasoning`/`tool-call` parts, tool
+  `[{type:tool-result, toolCallId, toolName, result}]`. Existing chats are
+  rewritten on the next BYOK turn (same blobId).
 
 ## [0.0.7]
 

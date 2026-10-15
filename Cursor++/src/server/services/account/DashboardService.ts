@@ -31,6 +31,7 @@ import { exportCanvasHtml, getCanvasesDir, lookupCanvasByKey, storeCanvas } from
 import { fetchManagedSkills } from '../../config/managedSkillsStore';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getGoUsageDisplayMessage } from './opencodeGoUsage';
 
 const BYOK_GET_ME_RESPONSE = {
     authId: 'auth0|user_COMETIX01J4XQQFHW0644WB114',
@@ -59,6 +60,12 @@ export default (router: ConnectRouter) => {
             }),
         }),
 
+        // 用量位文案：选中的模型属于 opencode Go provider（baseUrl 含
+        // opencode.ai/zen/go）时调 Zen /v1/usage 显示
+        // `Go 5h 42%(1h21m) · Week 18%(1d1h) · Month 9%(20d1h)`，
+        // 否则保持 `BYOK — unlimited`。
+        // 用量在每次对话结束后刷一次并缓存，用量位只读缓存；
+        // 失败回退 unlimited，绝不阻塞对话。
         getCurrentPeriodUsage: async () => ({
             billingCycleStart: BigInt(Date.now() - 30 * 86400000),
             billingCycleEnd: BigInt(Date.now() + 30 * 86400000),
@@ -67,7 +74,7 @@ export default (router: ConnectRouter) => {
                 limit: 999900,
             }),
             enabled: true,
-            displayMessage: 'BYOK — unlimited',
+            displayMessage: await getGoUsageDisplayMessage(),
         }),
 
         getTeams: async () => ({}),

@@ -7,6 +7,7 @@ import { clearPersistedConversationCheckpoint, getPersistedConversationCheckpoin
 import { warmupBlobsAsync } from './blobStore';
 import { logger } from '../../logger';
 import { isAgentRunAbortedError } from './wait';
+import { recordGoUsageModelSeen, refreshGoUsageAfterConversation } from '../../services/account/opencodeGoUsage';
 import {
     applyMcpsPart,
     applyRulesPart,
@@ -23,6 +24,10 @@ export async function* handleRunRequest(
     session: AgentSession | null = null,
 ): AsyncIterable<AgentServerMessage> {
     const parsed = parseRunRequest(msg);
+    // Track the chat-selected model for Go usage gating: Dashboard
+    // GetCurrentPeriodUsage shows Zen quota only when the selected model
+    // belongs to an opencode Go provider.
+    recordGoUsageModelSeen(parsed.modelId);
     // kvGetBlob 请求 id — 与 conversationRuntime 的 blobCounter 相互独立。
     // 用高位起始值避开后者(从 0 递增)的取值区间,防止 id 撞号。
     let nextBlobRequestId = 900_000;
@@ -124,6 +129,12 @@ export async function* handleRunRequest(
         }
 
         yield* handleConversationRun(parsed, session);
+        // Conversation finished: refresh Go usage once instead of polling on a
+        // timer. Fire-and-forget so the quota fetch never holds the SSE stream
+        // open; the chat slot reads the cached snapshot on its next poll.
+        refreshGoUsageAfterConversation().catch((error) => {
+            logger.warn({ error: (error as Error).message }, '[GO_USAGE] post-conversation refresh failed');
+        });
     } catch (error) {
         if (isAgentRunAbortedError(error)) {
             logger.info({

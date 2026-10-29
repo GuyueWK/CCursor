@@ -142,14 +142,20 @@ async function handleAvailableModels(request: Record<string, unknown>, context: 
 }
 
 /**
- * GetDefaultModel — 从 providers.json 推送 BYOK 默认模型到 Composer + Cmd+K。
+ * 只在客户端还没有默认模型时种一次。
  *
- * 客户端逻辑: nextDefaultSetDate > lastDefaultModelSetDate → setDefaultModel(model)
- * 返回空 {} = 不推送(客户端保留上次选择)。
+ * 客户端: lastDefaultModelSetDate === 0,或 nextDefaultSetDate 比它新,才 setDefaultModel。
+ * 日期必须稳定。每次返回 Date.now() 都会让刷新 (新会话挂载 / 登录 / BYOK refresh)
+ * 重新 setDefaultModel,把 Composer 默认模型盖成 providers.json 里第一个启用模型,
+ * 并清掉参数 (Extra High / Max)。种过一次之后,选择器的最近选择由客户端自己记住。
+ *
+ * 返回空 {} = 不推送。没有启用模型时必须走这条,避免把未启用模型推上去。
  *
  * 候选集必须与 AvailableModels 下发的启用集一致 —— 都走 isModelDefaultOn,
  * 否则会把选择器里根本没启用的模型推成默认模型。
  */
+export const DEFAULT_MODEL_SEED_DATE = '1'
+
 export async function handleGetDefaultModel() {
   // 与 "default" 占位名映射共用同一选择函数 (requestedModelId.ts), 两处永远指向同一个模型
   const all = enabledModelEntries()
@@ -161,7 +167,23 @@ export async function handleGetDefaultModel() {
     model: first.model.id,
     thinkingModel: thinkingModel?.model.id ?? '',
     maxMode: false,
-    nextDefaultSetDate: String(Date.now()),
+    nextDefaultSetDate: DEFAULT_MODEL_SEED_DATE,
+  }
+}
+
+/**
+ * 新会话不要切回 default。
+ *
+ * modelDefaultSwitchOnNewChat 为 true 时,createComposer 会把模型改成 "default"。
+ * BYOK 隐藏了 Auto,选择器就落到第一个具名模型。显式关掉,并把已配置模型放进豁免列表,
+ * 这样即使客户端还留着旧的 true,下次拉到这份数据后也不会清掉最近使用的模型。
+ * nudgeDate 保持 "0": 非 0 会再触发一次 "Model nudged to default"。
+ */
+export async function handleGetDefaultModelNudgeData() {
+  return {
+    nudgeDate: '0',
+    shouldDefaultSwitchOnNewChat: false,
+    modelsWithNoDefaultSwitch: flattenModels().map(entry => entry.model.id),
   }
 }
 
@@ -179,7 +201,7 @@ export default (router: ConnectRouter) => {
       ),
 
     getDefaultModel: handleGetDefaultModel,
-    getDefaultModelNudgeData: async () => ({ nudgeDate: '0' }),
+    getDefaultModelNudgeData: handleGetDefaultModelNudgeData,
     cppConfig: async () => ({
       isOn: true,
       isGhostText: true,

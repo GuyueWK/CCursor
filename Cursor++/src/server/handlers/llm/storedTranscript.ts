@@ -13,7 +13,12 @@ export interface StoredMessage {
 export type StoredBlock
   = | { type: 'text', text: string }
     | { type: 'image', mimeType: string, data: string }
-    | { type: 'reasoning', text: string, signature?: string, providerOptions?: Record<string, unknown> }
+    // sourceModel 标记 thinking 块的产出模型 (如 "openai-responses:opencode/go-model")。
+    // transformMessages 靠它判断跨模型 (signature 不兼容要降级)。
+    // 历史 blob 是 thinking 唯一的跨轮载体, 丢了它下一轮会被当成"来源不明"
+    // 而降级成 text, Responses 编码时 reasoning item 就发不出去了,
+    // 上游 thinking 模型就会 400 "reasoning_content must be passed back"。
+    | { type: 'reasoning', text: string, signature?: string, sourceModel?: string, providerOptions?: Record<string, unknown> }
     | { type: 'tool-call', toolCallId: string, toolName: string, args: Record<string, unknown> }
     | { type: 'tool-result', toolCallId: string, toolName?: string, result: string, isError?: boolean, structured?: unknown }
 
@@ -126,6 +131,7 @@ function parseContentBlocks(blocks: unknown[]): StoredBlock[] {
           type: 'reasoning',
           text: typeof block.text === 'string' ? block.text : '',
           ...(typeof block.signature === 'string' ? { signature: block.signature } : {}),
+          ...(typeof block.sourceModel === 'string' ? { sourceModel: block.sourceModel } : {}),
           ...(isRecord(block.providerOptions) ? { providerOptions: block.providerOptions } : {}),
         })
         break
@@ -329,6 +335,7 @@ export function storedMessageToLLMMessage(message: StoredMessage): LLMMessage {
           type: 'thinking',
           text: block.text,
           ...(block.signature ? { signature: block.signature } : {}),
+          ...(block.sourceModel ? { sourceModel: block.sourceModel } : {}),
           ...(block.providerOptions ? { providerOptions: block.providerOptions } : {}),
         })
         break
@@ -381,6 +388,7 @@ export function llmMessageToStoredMessage(message: LLMMessage): StoredMessage {
           type: 'reasoning',
           text: block.text,
           ...(typeof block.signature === 'string' ? { signature: block.signature } : {}),
+          ...(typeof block.sourceModel === 'string' ? { sourceModel: block.sourceModel } : {}),
           ...(block.providerOptions ? { providerOptions: block.providerOptions } : {}),
         })
         break
@@ -534,6 +542,7 @@ function officialUserAssistantParts(message: StoredMessage): Array<Record<string
           type: 'reasoning',
           text: block.text,
           ...(block.signature ? { signature: block.signature } : {}),
+          ...(block.sourceModel ? { sourceModel: block.sourceModel } : {}),
           ...(block.providerOptions ? { providerOptions: block.providerOptions } : {}),
         })
         break

@@ -661,21 +661,29 @@ export function encodeResponsesInput(messages: LLMMessage[]): ResponsesEncodedIn
 
       // thinking → ResponseReasoningItem (仅限同 provider 回传)
       // Pi 方式: signature 是完整 ResponseReasoningItem JSON，直接还原。
-      // 跨 provider 的 thinking 块无有效 signature → 跳过（已由 transformMessages 降级为 text）。
+      // 跨 provider 的 thinking 块无有效 signature → 落到下面的 orphanThinkingText,
+      // 并进 assistant 文本, 避免静默丢失 (transformMessages 已把跨模型降级为 text,
+      // 这里是同模型但 signature 缺失/非法的兜底)。
+      const orphanThinkingTexts: string[] = []
       for (const tb of thinkingBlocks) {
         if (tb.signature) {
           try {
             const reasoningItem = JSON.parse(tb.signature)
             if (reasoningItem?.type === 'reasoning' && reasoningItem?.id) {
               items.push(reasoningItem as unknown as ResponseInputItem)
+              continue
             }
           }
-          catch { /* 非合法 JSON（跨 provider signature）→ 跳过 */ }
+          catch { /* 非合法 JSON（跨 provider signature）→ 落到 orphan 文本 */ }
+        }
+        if (tb.text) {
+          orphanThinkingTexts.push(tb.text)
         }
       }
 
-      if (textParts) {
-        items.push({ role: 'assistant', content: textParts })
+      const assistantText = [textParts, ...orphanThinkingTexts].filter(part => part.length > 0).join('\n')
+      if (assistantText) {
+        items.push({ role: 'assistant', content: assistantText })
       }
       for (const tu of toolUses) {
         items.push({

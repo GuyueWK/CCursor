@@ -24,6 +24,7 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 
 ### Fixed
 
+- 新会话总是选中 providers.json 里第一个启用模型: GetDefaultModel 每次返回 `Date.now()`,客户端把这次刷新当成新的默认模型并覆盖最近选择。现在只种一次稳定日期,之后保留选择器里最近使用的模型;新会话也不再被切回 default (BYOK 隐藏 Auto 后会落到第一个具名模型)。
 - GetDefaultModel 与模型选择器对 `defaultOn` 的口径不一致:缺省字段在选择器里是关闭,却会被推成 Composer / Cmd+K 的默认模型。现在只有显式 `defaultOn: true` 才启用。
 - Canvas 单文件导出把 `data.json` 内联进 `<script>` 前转义 `<`,避免内容里的 `</script>` 截断 HTML。
 - Cursor 3.23+ 安装时强制关闭 `cursor_agent_host` 门闩,Remote-SSH 上的 BYOK 模型不再被官方端拒绝为无效模型名。更新 Cursor 后需要重新安装。

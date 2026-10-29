@@ -33,7 +33,10 @@ import { performWebFetch, performWebSearch } from './web';
 import { interactionQuery } from './stream';
 import type { ToolResultEnvelope } from './toolResults';
 import type { ParsedRunRequest } from './protocol/types';
+import type { ParsedCustomSubagent } from './protocol/types';
 import type { ReadContextState } from './contextCatalog';
+import { lookupModel } from '../../config/providersStore';
+import { resolveDefaultModelId, resolveRequestedModelId } from '../models/requestedModelId';
 import {
     applyAutoReviewToArgs,
     buildAutoReviewBlockResult,
@@ -46,20 +49,52 @@ import {
 
 type SubagentModelOverride = ParsedRunRequest['subagentModelOverrides'][number];
 
-function resolveSubagentModel(
+/**
+ * 子代理模型解析优先级:
+ *   1. Settings > Subagents 的显式 override (proto subagent_model_overrides) — 最高优
+ *   2. `.cursor/agents/<name>.md` frontmatter `model:` — 次优, 需在 providers.json 可解析
+ *   3. 继承主会话模型 — 兜底
+ *
+ * `.md` 里常见的 `inherit` / 空串表示"跟随主模型", 不会触发默认模型映射;
+ * 只有写了具体 id (或 `default` / `auto`) 才会尝试解析。解析失败时回退到
+ * 主模型并打 warn, 避免官方路由名 (如 composer-2-fast) 直接打爆 providers.json
+ * 反向索引导致 ModelNotFound。
+ */
+export function resolveSubagentModel(
     subagentType: string,
     parentModelId: string,
     overrides?: SubagentModelOverride[],
+    customSubagents?: ParsedCustomSubagent[],
 ): string {
-    const override = overrides?.find(o => o.subagentType === subagentType);
-    if (!override || override.selection.case === 'inherit') {
-        logger.debug({ subagentType, parentModelId, overrideCount: overrides?.length ?? 0 }, '[TOOL] subagent model → inherit parent');
-        return parentModelId;
-    }
-    if (override.selection.case === 'model' && override.selection.modelId) {
+    const override = overrides?.find((candidate) => candidate.subagentType === subagentType);
+    if (override?.selection.case === 'model' && override.selection.modelId) {
         logger.info({ subagentType, modelId: override.selection.modelId, parentModelId }, '[TOOL] subagent model → override');
         return override.selection.modelId;
     }
+    if (override?.selection.case === 'disabled') {
+        logger.debug({ subagentType, parentModelId }, '[TOOL] subagent model → disabled override, inherit parent');
+        return parentModelId;
+    }
+    const definition = customSubagents?.find((candidate) => candidate.name === subagentType);
+    if (definition?.forceDefaultModel) {
+        const defaultModelId = resolveDefaultModelId();
+        if (defaultModelId) {
+            logger.info({ subagentType, modelId: defaultModelId, parentModelId }, '[TOOL] subagent model → forceDefaultModel');
+            return defaultModelId;
+        }
+    }
+    const rawModel = definition?.model?.trim() ?? '';
+    if (!rawModel || rawModel.toLowerCase() === 'inherit') {
+        logger.debug({ subagentType, parentModelId, overrideCount: overrides?.length ?? 0, hasDefinition: !!definition }, '[TOOL] subagent model → inherit parent');
+        return parentModelId;
+    }
+    const effectiveModelId = resolveRequestedModelId(rawModel);
+    const hit = lookupModel(effectiveModelId);
+    if (hit) {
+        logger.info({ subagentType, modelId: effectiveModelId, rawModel, parentModelId }, '[TOOL] subagent model → md file');
+        return effectiveModelId;
+    }
+    logger.warn({ subagentType, rawModel, effectiveModelId, parentModelId }, '[TOOL] subagent md model not found in providers.json — inherit parent');
     return parentModelId;
 }
 
@@ -78,6 +113,8 @@ export async function* runToolCall(params: {
     conversationId: string;
     currentModelId: string;
     subagentModelOverrides?: SubagentModelOverride[];
+    /** `.cursor/agents/*.md` 解析出的自定义子代理定义, 用于 `model:` 兜底 */
+    customSubagents?: ParsedCustomSubagent[];
     round: number;
     session: AgentSession | null;
     roundContext: Pick<ProviderRoundContext, 'createToolResult' | 'recordToolResult'>;
@@ -144,16 +181,15 @@ async function* runToolCallInner(params: Parameters<typeof runToolCall>[0]): Asy
 
     // sanitizedInput 兜底补全:
     //
-    //   - taskToolCall: BYOK 模式下 SubAgent 必须继承主对话模型 (方案 A)。
-    //     即便 taskTool.ts 的 schema 已经移除 model 字段, 这里仍然无条件强制
-    //     覆盖 model / modelId —— 防御 LLM 记忆里残留的 "composer-2-fast" 等
-    //     官方 fallback 路由名通过 schema 之外的途径溜进来 (例如 LLM 在
-    //     arguments 里塞了非 schema 字段)。客户端侧 SubAgent 靠这个字段决定
-    //     走哪个模型, 错了就直接挂。
+    //   - taskToolCall: 优先级 Settings override > `.cursor/agents/*.md` model > 继承主模型。
+    //     这里仍然无条件强制覆盖 model / modelId —— 防御 LLM 记忆里残留的
+    //     "composer-2-fast" 等官方 fallback 路由名通过 schema 之外的途径溜进来
+    //     (例如 LLM 在 arguments 里塞了非 schema 字段)。客户端侧 SubAgent 靠这个
+    //     字段决定走哪个模型, 错了就直接挂; `.md` 里写了非法 id 时会回退到主模型。
     let sanitizedInput = resolvedTool.sanitizedInput;
     if (cursorToolType === 'taskToolCall') {
         const subagentType = (sanitizedInput.subagent_type ?? sanitizedInput.subagentType ?? 'explore') as string;
-        const resolvedModelId = resolveSubagentModel(subagentType, params.currentModelId, params.subagentModelOverrides);
+        const resolvedModelId = resolveSubagentModel(subagentType, params.currentModelId, params.subagentModelOverrides, params.customSubagents);
         sanitizedInput = { ...sanitizedInput, model: resolvedModelId, modelId: resolvedModelId };
     }
     let startedArgs: Record<string, unknown>;
@@ -831,6 +867,8 @@ export async function* launchTaskTool(params: {
     conversationId: string;
     currentModelId: string;
     subagentModelOverrides?: SubagentModelOverride[];
+    /** `.cursor/agents/*.md` 解析出的自定义子代理定义, 用于 `model:` 兜底 */
+    customSubagents?: ParsedCustomSubagent[];
     round: number;
     allocateExecMessageId: () => number;
     /** cursor namespace 已注册的内置工具 —— Task 经 CallDynamicTool 进来时据此解包 */
@@ -851,7 +889,7 @@ export async function* launchTaskTool(params: {
 
     let sanitizedInput = resolvedTool.sanitizedInput;
     const subagentType = (sanitizedInput.subagent_type ?? sanitizedInput.subagentType ?? 'explore') as string;
-    const resolvedModelId = resolveSubagentModel(subagentType, params.currentModelId, params.subagentModelOverrides);
+    const resolvedModelId = resolveSubagentModel(subagentType, params.currentModelId, params.subagentModelOverrides, params.customSubagents);
     sanitizedInput = { ...sanitizedInput, model: resolvedModelId, modelId: resolvedModelId };
 
     logger.info({

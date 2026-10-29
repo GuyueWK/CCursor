@@ -40,6 +40,25 @@ export class OpenAIChatProvider implements LLMProvider {
     }
 
     async *stream(request: LLMStreamRequest): AsyncIterable<LLMStreamEvent> {
+        // 与 openai-responses 同理: 历史 reasoning 丢失后上游 thinking 模型会 400。
+        // Chat 通道本身不回传 thinking 块, 只能靠关掉 reasoning_effort 降级重试。
+        try {
+            yield* this.streamOnce(request, true)
+        }
+        catch (error) {
+            if (isReasoningPassthroughError(error) && request.thinkingLevel) {
+                logger.warn({
+                    model: request.model,
+                    error: (error as Error).message,
+                }, '[OAI_CHAT] reasoning passthrough failed, retrying without thinking')
+                yield* this.streamOnce(request, false)
+                return
+            }
+            throw error
+        }
+    }
+
+    private async *streamOnce(request: LLMStreamRequest, withReasoning: boolean): AsyncIterable<LLMStreamEvent> {
         const diagnostics = createTransformDiagnostics('openai-chat', request.messages.length);
         const transformed = transformMessages(request.messages, 'openai-chat', diagnostics, request.model);
         if (hasTransformMutations(diagnostics)) {
@@ -64,7 +83,7 @@ export class OpenAIChatProvider implements LLMProvider {
         }
 
         // OpenAI reasoning_effort: minimal | low | medium | high | xhigh | max
-        if (request.thinkingLevel) {
+        if (withReasoning && request.thinkingLevel) {
             params.reasoning_effort = request.thinkingLevel;
         }
 
@@ -149,4 +168,10 @@ export class OpenAIChatProvider implements LLMProvider {
             usage: usage ?? { inputTokens: 0, outputTokens: 0 },
         };
     }
+}
+
+function isReasoningPassthroughError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+    const normalized = message.toLowerCase()
+    return normalized.includes('reasoning_content') && normalized.includes('must be passed back')
 }

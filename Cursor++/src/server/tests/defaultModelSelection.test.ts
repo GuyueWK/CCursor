@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { setProvidersForTests } from '../config/providersStore'
 import { isModelDefaultOn } from '../data/defaults'
 import { buildByokAvailableModels } from '../handlers/models/byokModelBuilder'
-import { handleGetDefaultModel } from '../services/core/AiService'
+import { DEFAULT_MODEL_SEED_DATE, handleGetDefaultModel, handleGetDefaultModelNudgeData } from '../services/core/AiService'
 
 /**
  * defaultOn 的判定口径 — AvailableModels 与 GetDefaultModel 必须一致。
@@ -65,6 +65,34 @@ it('picks the first enabled model, and the first enabled thinking model', async 
 
   expect(res.model).toBe('enabled-plain')
   expect(res.thinkingModel).toBe('enabled-thinking')
+  expect(res.nextDefaultSetDate).toBe(DEFAULT_MODEL_SEED_DATE)
+})
+
+it('does not advance the seed date, so a refresh cannot overwrite the last selection', async () => {
+  useProviders([
+    model('first-enabled', { defaultOn: true }),
+    model('recently-used', { defaultOn: true }),
+  ])
+
+  const first = await handleGetDefaultModel() as Record<string, unknown>
+  const second = await handleGetDefaultModel() as Record<string, unknown>
+
+  expect(first.nextDefaultSetDate).toBe(DEFAULT_MODEL_SEED_DATE)
+  expect(second.nextDefaultSetDate).toBe(first.nextDefaultSetDate)
+  expect(Number(first.nextDefaultSetDate)).toBeLessThan(Date.now())
+})
+
+it('does not ask the client to switch back to default on a new chat', async () => {
+  useProviders([
+    model('off', { defaultOn: false }),
+    model('recently-used', { defaultOn: true }),
+  ])
+
+  const nudge = await handleGetDefaultModelNudgeData()
+
+  expect(nudge.nudgeDate).toBe('0')
+  expect(nudge.shouldDefaultSwitchOnNewChat).toBe(false)
+  expect(nudge.modelsWithNoDefaultSwitch).toEqual(['off', 'recently-used'])
 })
 
 it('never pushes a model that AvailableModels reports as off', async () => {

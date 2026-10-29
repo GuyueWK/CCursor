@@ -148,6 +148,11 @@ export async function* handleSummarizeAction(
         const llmStream = route.provider.stream({
             model: route.model,
             thinking: false,
+            // opencode Go 等网关要求 x-opencode-session 会话亲和头。
+            // 该头由 provider 侧按 conversationId 模板解析, 缺了会 400。
+            // 摘要调用此前没传 conversationId, 直接触发
+            // "Request is missing x-opencode-session" 后走本地降级。
+            conversationId: parsed.conversationId,
             messages: [
                 { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
                 { role: 'user', content: buildSummaryUserMessage(summarySourceText) },

@@ -253,6 +253,22 @@ function normalizeIdsAndThinking(messages: LLMMessage[], targetProvider: Provide
   let idNormalizations = 0
   let signedThinkingDowngraded = 0
 
+  // Responses reasoning item 的 signature 是整块 reasoning JSON
+  // (如 {"type":"reasoning","id":"rs_...","encrypted_content":"..."})。
+  // 修 sourceModel 持久化之前的老 blob 只有 signature 没有 sourceModel,
+  // 直接按"来源不明"降级成 text 会把合法 reasoning item 弄丢,
+  // 下一轮上游 thinking 模型就 400 "reasoning_content must be passed back"。
+  // 这里做兼容: signature 能解析成合法 reasoning item 的按同模型保留。
+  function isValidResponsesReasoningSignature(signature: string): boolean {
+    try {
+      const parsed = JSON.parse(signature) as Record<string, unknown>
+      return parsed?.type === 'reasoning' && typeof parsed?.id === 'string' && (parsed.id as string).length > 0
+    }
+    catch {
+      return false
+    }
+  }
+
   const getNormalizedId = (id: string): string => {
     const existing = toolCallIdMap.get(id)
     if (existing)
@@ -301,13 +317,19 @@ function normalizeIdsAndThinking(messages: LLMMessage[], targetProvider: Provide
               }
             }
             else if (!block.sourceModel && block.signature) {
-              // 无 sourceModel 但有 signature — 来源不明, 同样按目标分化处理
-              signedThinkingDowngraded++
-              if (targetProvider === 'openai-responses') {
-                if (block.text) transformedContent.push({ type: 'text', text: block.text })
+              // 无 sourceModel 但有 signature — 老 blob (sourceModel 持久化之前写入)。
+              // 合法 Responses reasoning item 按同模型保留, 否则按目标分化降级。
+              if (targetProvider === 'openai-responses' && isValidResponsesReasoningSignature(block.signature)) {
+                transformedContent.push(block)
               }
               else {
-                transformedContent.push({ type: 'thinking', text: block.text ?? '' })
+                signedThinkingDowngraded++
+                if (targetProvider === 'openai-responses') {
+                  if (block.text) transformedContent.push({ type: 'text', text: block.text })
+                }
+                else {
+                  transformedContent.push({ type: 'thinking', text: block.text ?? '' })
+                }
               }
             }
             else {

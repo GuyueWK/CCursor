@@ -48,6 +48,28 @@ export class OpenAIResponsesProvider implements LLMProvider {
   }
 
   async *stream(request: LLMStreamRequest): AsyncIterable<LLMStreamEvent> {
+    // 压缩/历史重建后 thinking signature 可能已丢失 (老 blob 无 sourceModel、
+    // 摘要把 reasoning 压成纯文本), 上游 thinking 模型会 400
+    // "reasoning_content ... must be passed back"。此时降级重试一次:
+    // 关掉 reasoning (非思考模式不再要求回传 reasoning), 至少让对话继续,
+    // 而不是整轮失败弹 retry banner。
+    try {
+      yield* this.streamOnce(request, true)
+    }
+    catch (error) {
+      if (isReasoningPassthroughError(error) && request.thinkingLevel) {
+        logger.warn({
+          model: request.model,
+          error: (error as Error).message,
+        }, '[OAI_RESP] reasoning passthrough failed, retrying without thinking')
+        yield* this.streamOnce(request, false)
+        return
+      }
+      throw error
+    }
+  }
+
+  private async *streamOnce(request: LLMStreamRequest, withReasoning: boolean): AsyncIterable<LLMStreamEvent> {
     const diagnostics = createTransformDiagnostics('openai-responses', request.messages.length)
     const transformed = transformMessages(request.messages, 'openai-responses', diagnostics, request.model)
     if (hasTransformMutations(diagnostics)) {
@@ -81,7 +103,7 @@ export class OpenAIResponsesProvider implements LLMProvider {
     }
 
     // Reasoning — Responses API 用 reasoning 嵌套对象 (非顶层 reasoning_effort)
-    if (request.thinkingLevel) {
+    if (withReasoning && request.thinkingLevel) {
       params.reasoning = {
         effort: request.thinkingLevel,
         summary: 'auto',
@@ -203,4 +225,15 @@ export class OpenAIResponsesProvider implements LLMProvider {
       }
     }
   }
+}
+
+/**
+ * 上游 thinking 模型要求回传 reasoning_content, 但历史里没有可用 reasoning
+ * (压缩把 reasoning 压掉 / 老 blob 丢了 sourceModel 导致降级)。
+ * 按消息文本判断, 命中后调用方降级重试 (关 reasoning)。
+ */
+function isReasoningPassthroughError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  const normalized = message.toLowerCase()
+  return normalized.includes('reasoning_content') && normalized.includes('must be passed back')
 }

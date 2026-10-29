@@ -7,6 +7,7 @@ import {
   resolveDefaultModelId,
   resolveRequestedModelId,
 } from '../handlers/models/requestedModelId'
+import { handleGetDefaultModel } from '../services/core/AiService'
 
 const ALIAS_PROVIDERS: ProvidersConfig = {
   $schemaVersion: 1,
@@ -91,6 +92,50 @@ describe('default model alias', () => {
   it('still rejects unknown concrete ids', () => {
     setProvidersForTests(ALIAS_PROVIDERS)
     expect(() => resolveModel('model-does-not-exist')).toThrow(ModelNotFoundError)
+  })
+
+  it('maps the alias to exactly the model GetDefaultModel pushes', async () => {
+    setProvidersForTests(ALIAS_PROVIDERS)
+    const pushed = await handleGetDefaultModel() as { model?: string }
+    expect(resolveRequestedModelId('default')).toBe(pushed.model)
+  })
+
+  it('treats a missing defaultOn as disabled when choosing the alias target (PR #18)', () => {
+    setProvidersForTests({
+      $schemaVersion: 1,
+      providers: [{
+        id: 'p',
+        name: 'P',
+        type: 'anthropic',
+        baseUrl: '',
+        auth: { kind: 'apiKey', value: 'test-key' },
+        models: [
+          { id: 'unset-flag', apiModel: 'm1', displayName: 'Unset', thinking: false, contextTokenLimit: 200000 },
+          { id: 'explicitly-on', apiModel: 'm2', displayName: 'On', thinking: false, defaultOn: true, contextTokenLimit: 200000 },
+        ],
+      }],
+    })
+    expect(resolveRequestedModelId('default')).toBe('explicitly-on')
+  })
+
+  it('falls back to the first configured model when none is enabled', async () => {
+    setProvidersForTests({
+      $schemaVersion: 1,
+      providers: [{
+        id: 'p',
+        name: 'P',
+        type: 'anthropic',
+        baseUrl: '',
+        auth: { kind: 'apiKey', value: 'test-key' },
+        models: [
+          { id: 'first', apiModel: 'm1', displayName: 'First', thinking: false, contextTokenLimit: 200000 },
+          { id: 'second', apiModel: 'm2', displayName: 'Second', thinking: false, defaultOn: false, contextTokenLimit: 200000 },
+        ],
+      }],
+    })
+    // GetDefaultModel 不推送 (客户端保留上次选择), 但 "default" 请求仍需可服务
+    expect(await handleGetDefaultModel()).toEqual({})
+    expect(resolveRequestedModelId('default')).toBe('first')
   })
 
   it('falls back to the original placeholder when providers.json has no models', () => {

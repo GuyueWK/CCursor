@@ -12,7 +12,7 @@ import { needsProxy39Patch, isProxy39Patched, getProxy39Target } from './patch-p
 import { inspectAlwaysLocalPatch } from './patch-always-local.js';
 import { getAgentHostBackupTargets, inspectAgentHostPatch } from './patch-agent-host.js';
 import { inspectAgentHostGatePatch } from './patch-agent-host-gate.js';
-import { isInjectPatched } from './patch-inject.js';
+import { isInjectCurrent, isInjectPatched } from './patch-inject.js';
 
 const ok = s => `\x1b[32m✓ ${s}\x1b[0m`;
 const fail = s => `\x1b[31m✗ ${s}\x1b[0m`;
@@ -37,7 +37,10 @@ export async function status() {
   if (existsSync(paths.workbenchJs)) {
     const wb = readFileSync(paths.workbenchJs, 'utf-8');
     const injected = isInjectPatched(wb);
-    console.log(injected ? ok('Renderer hook injected (desktop)') : fail('Renderer hook not injected (desktop)'));
+    // 已注入但修订号过旧 = 旧版 ccursor 安装的 hook, 缺少新行为 (如 glass renderer 层路由), 需 update
+    console.log(!injected ? fail('Renderer hook not injected (desktop)')
+      : isInjectCurrent(wb) ? ok('Renderer hook injected (desktop)')
+        : fail('Renderer hook outdated (desktop) — run "ccursor update"'));
   } else {
     console.log(na('workbench.desktop.main.js not found'));
   }
@@ -46,7 +49,10 @@ export async function status() {
   if (existsSync(paths.glassJs)) {
     const gl = readFileSync(paths.glassJs, 'utf-8');
     const injected = isInjectPatched(gl);
-    console.log(injected ? ok('Renderer hook injected (glass)') : fail('Renderer hook not injected (glass)'));
+    // 已注入但修订号过旧 = 旧版 ccursor 安装的 hook, 缺少新行为 (如 glass renderer 层路由), 需 update
+    console.log(!injected ? fail('Renderer hook not injected (glass)')
+      : isInjectCurrent(gl) ? ok('Renderer hook injected (glass)')
+        : fail('Renderer hook outdated (glass) — run "ccursor update"'));
   } else {
     console.log(na('workbench.glass.main.js not found (pre-3.8)'));
   }
@@ -92,14 +98,11 @@ export async function status() {
     console.log(agentHost.wait ? ok('Agent Host server wait active') : fail('Agent Host server wait missing'));
     if (agentHost.turnRouteRequired) {
       console.log(agentHost.turnRoute
-        ? ok('Agent Host turn router pinned to connect (3.19.19+ BYOK)')
-        : fail('Agent Host turn router still routes to managed-local (3.19.19+ BYOK unreachable)'));
-    }
-    else if (agentHost.entryValid) {
-      console.log(na('Agent Host local-loop turn router not present (pre-3.19.19 or non-entry chunk)'));
+        ? ok('Agent Host turn route guarded (BYOK → connect, OFF unchanged)')
+        : fail('Agent Host turn route unguarded (BYOK turns may reach managed-local)'));
     }
     else {
-      console.log(fail('Agent Host turn router state unknown (entry unreadable)'));
+      console.log(na('Agent Host turn router not present (pre-3.16.29)'));
     }
     console.log(agentHost.networkTargets.length > 0
       ? ok(`Agent Host network target verified (${agentHost.networkTargets.map(file => file.split(/[\\/]/).pop()).join(', ')})`)

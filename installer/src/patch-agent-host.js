@@ -13,7 +13,8 @@ import * as acorn from 'acorn';
 import { createBackup } from './backup.js';
 import { updateChecksums } from './checksum.js';
 import { hasActivateWait, injectActivateWait } from './patch-always-local.js';
-import { buildNodeHttp11RouterPayload, isNodeHttp11RouterPatched } from './node-http11-router.js';
+import { buildNodeHttp11RouterPayload, isNodeHttp11RouterPatched, stripLegacyRouterPayload } from './node-http11-router.js';
+import { assertTurnRouteShape, guardTurnRoute, isTurnRouteGuarded, mayContainTurnRoute } from './agent-turn-route-guard.js';
 import {
   AGENT_WS_GATE_MARKER,
   AGENT_WS_ORIGINS_MARKER,
@@ -181,7 +182,8 @@ function prepareAgentHostPatch(paths, log) {
   }
   const patchedByFile = new Map(originalByFile);
 
-  let entry = patchedByFile.get(paths.agentHostMain);
+  // 先剥离旧版本路由块, 避免新旧 payload 叠加 (见 node-http11-router.js stripLegacyRouterPayload)
+  let entry = stripLegacyRouterPayload(patchedByFile.get(paths.agentHostMain));
   if (!isNodeHttp11RouterPatched(entry, AGENT_HOST_ROUTER_MARKER)) {
     entry = buildAgentHostRouter() + entry;
     log?.('  Agent Host HTTP/1.1 whitelist router injected');
@@ -191,15 +193,6 @@ function prepareAgentHostPatch(paths, log) {
   if (!waited.ok) throw new Error('cursor-agent-host activate function not found');
   entry = waited.source;
 
-  const routed = forceConnectTurnRoute(entry);
-  const turnRouteRequired = routed.required;
-  if (routed.required && !routed.matched) {
-    // 路由模块在,但 managed-local eligible 分支的形状变了 —— 不能装作适配成功。
-    throw new Error('cursor-agent-host local-loop turn router shape changed: managed-local eligible route anchor not found (this Cursor version needs an updated patch)');
-  }
-  if (routed.changed) log?.('  Agent Host turn router pinned to backend loop (connect)');
-  else if (!routed.required) log?.('  Agent Host local-loop turn router not present (pre-3.19.19 or non-entry chunk), skipping');
-  entry = routed.source;
   patchedByFile.set(paths.agentHostMain, entry);
 
   let websocketTargets = 0;
@@ -212,11 +205,27 @@ function prepareAgentHostPatch(paths, log) {
     log?.(`  Agent WebSocket disabled in content-matched chunk: ${basename(file)}`);
   }
 
+  // Turn 路由守卫 (3.16.29+): BYOK 接管 RunSSE 时把 managed-local eligible 改走 connect。
+  // 3.16.29–3.18.25 在懒加载 chunk, 3.19.19+ 在 main.js —— 按内容扫描全部 dist 文件。
+  const distFiles = listDistJavaScript(paths).map(file => ({ file, source: patchedByFile.get(file) ?? readFileSync(file, 'utf-8') }));
+  const { required: turnRouteRequired } = assertTurnRouteShape(distFiles);
+  let turnRouteTargets = 0;
+  for (const { file, source } of distFiles) {
+    if (!mayContainTurnRoute(source)) continue;
+    if (!originalByFile.has(file)) originalByFile.set(file, readFileSync(file, 'utf-8'));
+    const guarded = guardTurnRoute(source, basename(file));
+    if (guarded.changed || guarded.guarded) turnRouteTargets++;
+    if (guarded.changed) {
+      patchedByFile.set(file, guarded.source);
+      log?.(`  Agent Host turn route guarded (BYOK → connect): ${basename(file)}`);
+    }
+  }
+
   for (const [file, source] of patchedByFile) {
     if (source !== originalByFile.get(file)) parseBundle(source, basename(file));
   }
 
-  return { originalByFile, patchedByFile, networkTargets, websocketTargets, turnRouteRequired };
+  return { originalByFile, patchedByFile, networkTargets, websocketTargets, turnRouteRequired, turnRouteTargets };
 }
 
 export function patchAgentHost(paths, log) {
@@ -275,13 +284,21 @@ export function inspectAgentHostPatch(paths) {
   if (!entryValid) errors.push('entry fingerprint mismatch');
   const router = Boolean(entry) && isNodeHttp11RouterPatched(entry, AGENT_HOST_ROUTER_MARKER);
   const wait = Boolean(entry) && hasActivateWait(entry);
-  // 用路由模块指纹判断该版本是否带这段代码;没有指纹 = pre-3.19.19 或代码在
-  // 懒加载 chunk 里,视为无需此补丁。
-  // 有指纹时必须"已钉住且锚点已清零",否则视为未打(或版本漂移)。
-  const turnRouteRequired = Boolean(entry) && hasTurnRouter(entry);
-  const turnRoute = !turnRouteRequired
-    || (isConnectTurnRoutePinned(entry) && countEligibleTurnRoutes(entry) === 0);
-  if (turnRouteRequired && !turnRoute) errors.push('local-loop turn router not pinned to connect');
+  // Turn 路由守卫: 存在 eligible 分支的文件必须全部已守卫
+  let turnRouteRequired = false;
+  let turnRoute = true;
+  try {
+    const distFiles = listDistJavaScript(paths).map(file => ({ file, source: readFileSync(file, 'utf-8') }));
+    turnRouteRequired = assertTurnRouteShape(distFiles).required;
+    for (const { file, source } of distFiles) {
+      if (mayContainTurnRoute(source) && !isTurnRouteGuarded(source, basename(file))) turnRoute = false;
+    }
+  }
+  catch (error) {
+    turnRoute = false;
+    errors.push(error.message);
+  }
+  if (turnRouteRequired && !turnRoute) errors.push('turn route not guarded (managed-local eligible reachable under BYOK)');
 
   let networkTargets = [];
   try { networkTargets = findAgentHostNetworkTargets(paths); }
@@ -343,8 +360,8 @@ export function checkAgentHostPatch(paths, log) {
     log?.(`  [OK] ${prepared.networkTargets.length} network chunk(s) found by semantic fingerprints`);
     log?.(`  [OK] ${prepared.websocketTargets} WebSocket chunk(s) can be disabled`);
     log?.(prepared.turnRouteRequired
-      ? '  [OK] local-loop turn router anchor found (3.19.19+ BYOK)'
-      : '  [OK] local-loop turn router not required (pre-3.19.19 or non-entry chunk)');
+      ? `  [OK] turn route guard target found in ${prepared.turnRouteTargets} file(s)`
+      : '  [OK] turn router not present (pre-3.16.29, not required)');
     return true;
   }
   catch (error) {

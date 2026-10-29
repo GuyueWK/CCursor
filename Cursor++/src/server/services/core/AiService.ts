@@ -45,8 +45,7 @@ import {
   toHiddenClassifierStubModel,
 } from '../../handlers/models/byokModelBuilder'
 import { fetchUpstreamAvailableModels } from '../../handlers/models/upstream'
-import { flattenModels } from '../../config/providersStore'
-import { isModelDefaultOn } from '../../data/defaults'
+import { enabledModelEntries } from '../../handlers/models/requestedModelId'
 import { logger } from '../../logger'
 
 /**
@@ -152,7 +151,8 @@ async function handleAvailableModels(request: Record<string, unknown>, context: 
  * 否则会把选择器里根本没启用的模型推成默认模型。
  */
 export async function handleGetDefaultModel() {
-  const all = flattenModels().filter(x => isModelDefaultOn(x.model))
+  // 与 "default" 占位名映射共用同一选择函数 (requestedModelId.ts), 两处永远指向同一个模型
+  const all = enabledModelEntries()
   const first = all[0]
   if (!first)
     return {}

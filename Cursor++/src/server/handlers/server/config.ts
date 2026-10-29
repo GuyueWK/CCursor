@@ -15,20 +15,22 @@
  *   - agentLayoutPolicy: Agent 布局允许/禁止的 action IDs
  *   - currentInAppAd: 应用内广告 (InAppAdService 用)
  *   - onboardingConfig: 新用户引导配置
+ *   - http2Config: 强制客户端全量 HTTP/1.1 (BYOK 专属, 见下方字段注释)
  */
 
-import { config } from '../../runtime-config';
 import { Http2Config } from '../../gen/aiserver_v1_pb';
+import { config } from '../../runtime-config';
 
 export function buildServerConfig() {
     const byokUrl = `http://${config.server.host}:${config.server.port}`;
 
     return {
-        // BYOK 的路由是 HTTP/1.1 白名单拦截 (http/https.request monkey patch)。
-        // 3.26 的 Agent Host 在 http2Config=UNSPECIFIED 时会为部分 RPC 建 HTTP/2
-        // transport (baseUrl api2/agentn)，完全绕过拦截，RunSSE 直达官方并被判
-        // "Unknown model ID"。这里显式要求全量 HTTP/1.1，让所有 Cursor API 请求
-        // 都经过本地路由。
+        // BYOK 的路由是 HTTP/1.1 白名单拦截 (http/https.request), HTTP/2 (http2.connect) 不经过它。
+        // 客户端判定 (cursor-always-local / agent-host 的 resolveHttp1Reason):
+        //   服务端下发 FORCE_*_ENABLED 时会无视用户的 cursor.general.disableHttp2;
+        //   UNSPECIFIED 时才回落到用户设置。
+        // 显式下发 FORCE_ALL_DISABLED, 让 BYOK 不再依赖「用户手动切 HTTP/1.1」(Issue #34, PR #32/#38)。
+        // 本服务只在 BYOK ON 时接管 ServerConfigService, OFF 模式仍由官方下发。
         http2Config: Http2Config.FORCE_ALL_DISABLED,
 
         bugConfigResponse: {

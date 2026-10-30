@@ -1308,7 +1308,9 @@ export async function* handleConversationRun(
           mcpMetaTool: parsed.mcpMetaTool,
           supportsMcpAuth: parsed.supportsMcpAuth,
           cursorDynamicTools: parsed.cursorDynamicTools,
-          projectDir: parsed.env.projectFolder ?? parsed.env.workspacePaths?.[0],
+          // Keep spill files on the workspace machine, under Cursor's project directory.
+          projectDir: parsed.env.projectFolder,
+          osVersion: parsed.env.osVersion,
           autoReview: {
             enabled: parsed.env.smartModeClassifierAutoModeEnabled === true,
             forceBlockToken: parsed.env.devForceNextSmartModeClassifierBlockToken,

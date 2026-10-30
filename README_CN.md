@@ -158,7 +158,7 @@ Requires **Cursor IDE** + **Node.js >= 18**.
 | Cannot sign in after install / 安装后无法登录 | Toggle BYOK OFF in sidebar, then sign in / 侧边栏切 OFF 后登录 |
 | Model not found / 模型未找到 | Add model in sidebar panel / 在面板中添加模型 |
 | LLM 401/403/404 | Check API key & base URL in providers.json / 检查密钥和地址 |
-| `AI Model Not Found / Model name is not valid: "<id>"`（Cursor 3.23+，尤其 Remote-SSH） | 重新运行 `npx @cometix/ccursor install` 后重启 Cursor。3.23 开启了 `cursor_agent_host` 拓扑，Agent 会跑在 Cursor++ 够不到的地方；安装器现在会把它强制退回 legacy 拓扑。**每次 Cursor 更新后都要重跑**（更新会覆盖已打补丁的 bundle）。 |
+| `AI Model Not Found / Model name is not valid: "<id>"`（远端窗口，如 Remote-SSH / WSL） | 升级至 Cursor++ 0.0.17+，旧补丁使用 `npx @cometix/ccursor@latest update` 更新后重启 Cursor。新版仅在“远端窗口 + BYOK 开启”时切换到 legacy 拓扑，本地窗口及 BYOK 关闭时保留官方行为。远端窗口启动后才开启 BYOK 时，按提示重载窗口。**每次 Cursor 更新后都需重新安装补丁**（更新会覆盖 bundle）。 |
 
 ---
 

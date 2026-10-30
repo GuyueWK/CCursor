@@ -27,7 +27,9 @@ Format follows [Keep a Changelog](http://keepachangelog.com/).
 - 新会话总是选中 providers.json 里第一个启用模型: GetDefaultModel 每次返回 `Date.now()`,客户端把这次刷新当成新的默认模型并覆盖最近选择。现在只种一次稳定日期,之后保留选择器里最近使用的模型;新会话也不再被切回 default (BYOK 隐藏 Auto 后会落到第一个具名模型)。
 - GetDefaultModel 与模型选择器对 `defaultOn` 的口径不一致:缺省字段在选择器里是关闭,却会被推成 Composer / Cmd+K 的默认模型。现在只有显式 `defaultOn: true` 才启用。
 - Canvas 单文件导出把 `data.json` 内联进 `<script>` 前转义 `<`,避免内容里的 `</script>` 截断 HTML。
-- Cursor 3.23+ 安装时强制关闭 `cursor_agent_host` 门闩,Remote-SSH 上的 BYOK 模型不再被官方端拒绝为无效模型名。更新 Cursor 后需要重新安装。
+- 对齐上游 0.0.17: 仅在远端窗口 (Remote-SSH / WSL / Dev Container) 且 BYOK 开启时切换至 legacy Agent 拓扑,保留本地窗口及 BYOK 关闭时的官方行为;远端窗口启动后再开启 BYOK 时提示重载。更新 Cursor 后需要重新安装补丁。
+- 对齐上游 0.0.17: Shell 正确传递 `working_directory`;GetDynamicTools 大结果由工作区所在机器的客户端写入,避免 Windows / WSL / SSH 路径错配,写入失败时返回内联内容。
+- BYOK 开关测试显式模拟配置路径,并在写入前校验临时目录,避免 Windows 忽略 `HOME` 后触碰已安装环境的配置。
 - BYOK ON 时 Auto-review 置灰无法选择:客户端门禁是
   `hasSmartModeClassifierModel()` (AvailableModels 里至少一个
   `supportsSmartModeClassifier === true`,proto field 45),文档里写成

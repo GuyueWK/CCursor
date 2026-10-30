@@ -135,7 +135,7 @@ Requires **Cursor IDE** + **Node.js >= 18**.
 | Cannot sign in after install | Toggle BYOK OFF in sidebar panel, then sign in normally |
 | Model not found | Add the model in the sidebar panel or edit `~/.ccursor/providers.json` |
 | LLM 401/403/404 | Check API key and base URL in providers.json |
-| `AI Model Not Found / Model name is not valid: "<id>"` (Cursor 3.23+, especially Remote-SSH) | Re-run `npx @cometix/ccursor install`, then restart Cursor. 3.23 enabled the `cursor_agent_host` topology, which runs the agent outside Cursor++'s reach; the installer now forces it back to the legacy topology. Re-run after **every** Cursor update, since updates overwrite the patched bundles. |
+| `AI Model Not Found / Model name is not valid: "<id>"` (remote windows, including Remote-SSH / WSL) | Upgrade to Cursor++ 0.0.17+. Refresh older patches with `npx @cometix/ccursor@latest update`, then restart Cursor. The legacy topology is selected only for remote windows with BYOK on; local windows and BYOK-off behavior follow Cursor's original decision. If you enable BYOK after opening a remote window, reload it when prompted. Reinstall patches after **every** Cursor update, since updates overwrite the bundles. |
 
 ---
 

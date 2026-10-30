@@ -45,6 +45,7 @@ import {
   toHiddenClassifierStubModel,
 } from '../../handlers/models/byokModelBuilder'
 import { fetchUpstreamAvailableModels } from '../../handlers/models/upstream'
+import { flattenModels } from '../../config/providersStore'
 import { enabledModelEntries } from '../../handlers/models/requestedModelId'
 import { logger } from '../../logger'
 

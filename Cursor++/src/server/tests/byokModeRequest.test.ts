@@ -9,30 +9,29 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
  * 回归点: 翻转语义「读当前 → 取反」在一次点击被处理两次时 (实测 9ms 内两次) 会「关了又开」。
  * UI 改为发送目标值后, 重复/并发请求结果不变; 旧翻转入口 500ms 内的重复请求被丢弃。
  *
- * routesStore 读写 ~/.ccursor/routes.json —— 测试把 HOME 指向临时目录, 并在首个用例断言
- * 路径确实位于临时目录内, 绝不触碰真实配置。
+ * routesStore 读写 ~/.ccursor/routes.json。直接模拟路径,避免 Windows 上 homedir()
+ * 忽略 HOME 后触碰真实配置;在任何写入前验证路径。
  */
-const tmp = mkdtempSync(join(tmpdir(), 'ccursor-byok-mode-'))
-const realHome = process.env.HOME
+const temporaryDirectory = mkdtempSync(join(tmpdir(), 'ccursor-byok-mode-'))
 let store: typeof import('../config/routesStore')
 let paths: typeof import('../config/paths')
 
 beforeAll(async () => {
-  process.env.HOME = tmp
   paths = await import('../config/paths')
+  vi.spyOn(paths, 'getRoutesFilePath').mockReturnValue(join(temporaryDirectory, 'routes.json'))
+  expect(paths.getRoutesFilePath()).toBe(join(temporaryDirectory, 'routes.json'))
   store = await import('../config/routesStore')
   await store.ensureRoutesFile()
 })
 
 afterAll(() => {
-  process.env.HOME = realHome
   vi.restoreAllMocks()
-  rmSync(tmp, { recursive: true, force: true })
+  rmSync(temporaryDirectory, { recursive: true, force: true })
 })
 
 describe('requestByokMode', () => {
-  it('writes only inside the temporary HOME', () => {
-    expect(paths.getRoutesFilePath().startsWith(tmp)).toBe(true)
+  it('writes only to the mocked temporary routes file', () => {
+    expect(paths.getRoutesFilePath()).toBe(join(temporaryDirectory, 'routes.json'))
   })
 
   it('sets a target mode idempotently', async () => {

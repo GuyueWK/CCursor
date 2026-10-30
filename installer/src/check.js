@@ -6,8 +6,8 @@ import { findCursorPathsDetailed, formatDiagnostic } from './detect.js';
 import { checkAlwaysLocalPatch } from './patch-always-local.js';
 import { checkAgentHostPatch } from './patch-agent-host.js';
 import { checkProxy39Patch, needsProxy39Patch } from './patch-proxy-39.js';
-import { checkAgentHostGatePatch } from './patch-agent-host-gate.js';
 import { isInjectCurrent, isInjectPatched } from './patch-inject.js';
+import { hasAgentHostTopology, isAgentHostTopologyGuarded, locateTopologyRhs } from './agent-host-topology.js';
 
 const ok = s => `\x1b[32m✓ ${s}\x1b[0m`;
 const fail = s => `\x1b[31m✗ ${s}\x1b[0m`;
@@ -34,6 +34,22 @@ export async function check() {
       continue;
     }
     const wb = readFileSync(file, 'utf-8');
+    // 远端窗口 agent host 拓扑守卫 (3.13+): 干跑定位赋值点, 与 hook 注入同批写入
+    if (!hasAgentHostTopology(wb)) {
+      console.log(info(`Agent host topology (${label}): not present (pre-3.13, OK)`));
+    }
+    else if (isAgentHostTopologyGuarded(wb)) {
+      console.log(ok(`Agent host topology (${label}): guarded`));
+    }
+    else {
+      try {
+        console.log(ok(`Agent host topology (${label}): matchable (RHS "${locateTopologyRhs(wb, label).rhs}")`));
+      }
+      catch (error) {
+        console.log(fail(`Agent host topology (${label}): ${error.message}`));
+        allOk = false;
+      }
+    }
     // 与 patch-inject.js 的 ANCHORS 保持一致 —— 3.17.8 起模块注册键从
     // "out-build/external/bufbuild/connect/callback-client.js" 缩短为
     // "callback-client.js",只取文件名可同时命中新旧两种形态。
@@ -94,11 +110,6 @@ export async function check() {
   } else {
     console.log(info('Cursor 3.9 singleton BYOK router/proxy patch not required'));
   }
-
-  // 5b. Cursor 3.23+ agent-host gate off target
-  console.log(info('[check] Verifying cursor_agent_host gate-off target...'));
-  const agentGateOk = checkAgentHostGatePatch(paths, s => console.log(info(s)));
-  if (!agentGateOk) allOk = false;
 
   // 6. cursor-always-local main.js
   if (existsSync(paths.alwaysLocalMain)) {

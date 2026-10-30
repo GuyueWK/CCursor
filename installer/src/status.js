@@ -11,7 +11,7 @@ import { PROVIDERS_FILE_NAME, ROUTES_FILE_NAME } from './defaults.js';
 import { needsProxy39Patch, isProxy39Patched, getProxy39Target } from './patch-proxy-39.js';
 import { inspectAlwaysLocalPatch } from './patch-always-local.js';
 import { getAgentHostBackupTargets, inspectAgentHostPatch } from './patch-agent-host.js';
-import { inspectAgentHostGatePatch } from './patch-agent-host-gate.js';
+import { hasAgentHostTopology, isAgentHostTopologyGuarded } from './agent-host-topology.js';
 import { isInjectCurrent, isInjectPatched } from './patch-inject.js';
 
 const ok = s => `\x1b[32m✓ ${s}\x1b[0m`;
@@ -57,20 +57,17 @@ export async function status() {
     console.log(na('workbench.glass.main.js not found (pre-3.8)'));
   }
 
-  // Agent Host gate (Cursor 3.23+) — 强制 legacy 拓扑
-  const gateTargets = inspectAgentHostGatePatch(paths);
-  const gateRelevant = gateTargets.some(g => g.present && g.hasAnchor);
-  if (!gateRelevant) {
-    console.log(na('cursor_agent_host topology not present (pre-3.23)'));
-  }
-  else {
-    for (const g of gateTargets) {
-      if (!g.present) continue;
-      if (!g.hasAnchor) continue;
-      console.log(g.patched
-        ? ok(`Agent Host gate forced off (${g.label})`)
-        : fail(`Agent Host gate still enabled (${g.label}) — remote windows will bypass BYOK`));
+  // The renderer guard selects legacy only for remote windows with BYOK on.
+  for (const [file, label] of [[paths.workbenchJs, 'desktop'], [paths.glassJs, 'glass']]) {
+    if (!existsSync(file)) continue;
+    const source = readFileSync(file, 'utf-8');
+    if (!hasAgentHostTopology(source)) {
+      console.log(na(`Agent Host topology not present (${label}, pre-3.13)`));
+      continue;
     }
+    console.log(isAgentHostTopologyGuarded(source)
+      ? ok(`Agent Host topology guarded (${label}, remote BYOK only)`)
+      : fail(`Agent Host topology guard missing (${label}) - run "ccursor update"`));
   }
 
   // Legacy Agent transport (cursor-always-local)
